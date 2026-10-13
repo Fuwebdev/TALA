@@ -187,7 +187,48 @@ export class MockThoughtRepository implements IThoughtRepository {
     }
   }
 
+  async updateThought(thoughtId: string, params: import('../../domain/repositories/IThoughtRepository').UpdateThoughtDTO): Promise<Thought> {
+    const idx = this.thoughts.findIndex(t => t.id === thoughtId);
+    if (idx === -1) {
+      throw new Error(`Thought ${thoughtId} not found`);
+    }
+    const updated: Thought = {
+      ...this.thoughts[idx],
+      body: params.body,
+      category: params.category,
+      isEnvironmentalAlert: params.isEnvironmentalAlert ?? this.thoughts[idx].isEnvironmentalAlert,
+    };
+    this.thoughts[idx] = updated;
+    return updated;
+  }
+
+  async deleteThought(thoughtId: string): Promise<void> {
+    this.thoughts = this.thoughts.filter(t => t.id !== thoughtId);
+    delete this.comments[thoughtId];
+    this.savedThoughtIds.delete(thoughtId);
+  }
+
+  private blockedUsersMap: Map<string, Set<string>> = new Map();
+
+  async blockUser(blockerAliasId: string, blockedAliasId: string): Promise<void> {
+    if (!this.blockedUsersMap.has(blockerAliasId)) {
+      this.blockedUsersMap.set(blockerAliasId, new Set());
+    }
+    this.blockedUsersMap.get(blockerAliasId)!.add(blockedAliasId);
+  }
+
+  async unblockUser(blockerAliasId: string, blockedAliasId: string): Promise<void> {
+    if (this.blockedUsersMap.has(blockerAliasId)) {
+      this.blockedUsersMap.get(blockerAliasId)!.delete(blockedAliasId);
+    }
+  }
+
+  async getBlockedUserIds(blockerAliasId: string): Promise<string[]> {
+    return Array.from(this.blockedUsersMap.get(blockerAliasId) || []);
+  }
+
   async reportContent(targetType: 'thought' | 'comment', targetId: string, reason: ReportReason, details?: string): Promise<void> {
     console.log(`[Safety Report Submitted] Target: ${targetType} #${targetId} | Reason: ${reason} | Details: ${details || 'None'}`);
   }
 }
+

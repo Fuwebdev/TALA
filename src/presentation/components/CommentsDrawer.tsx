@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { X, Send, MessageSquare, ShieldCheck, Flag } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Send, MessageSquare, ShieldCheck, Flag, UserX, AlertTriangle } from 'lucide-react';
 import { Thought } from '../../domain/entities/Thought';
 import { Comment } from '../../domain/entities/Comment';
 import { Alias } from '../../domain/entities/Alias';
+import { ModerationService } from '../../application/services/ModerationService';
 
 interface CommentsDrawerProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface CommentsDrawerProps {
   loading: boolean;
   onAddComment: (thoughtId: string, body: string) => Promise<void>;
   onReportComment: (commentId: string) => void;
+  onBlockUser?: (aliasId: string, aliasName: string) => void;
 }
 
 export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
@@ -24,21 +26,37 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
   loading,
   onAddComment,
   onReportComment,
+  onBlockUser,
 }) => {
   const [commentBody, setCommentBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [moderationError, setModerationError] = useState<string | null>(null);
 
   if (!isOpen || !thought) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentBody.trim()) return;
+
     try {
       setSubmitting(true);
-      await onAddComment(thought.id, commentBody);
+      setModerationError(null);
+
+      // AI + Local Bad Word Moderation Pipeline
+      const modResult = await ModerationService.evaluateText(commentBody);
+      if (!modResult.allowed) {
+        setModerationError(
+          modResult.message ||
+            'Your comment contains inappropriate language. Please remove offensive words and try again.'
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      await onAddComment(thought.id, commentBody.trim());
       setCommentBody('');
-    } catch (err) {
-      console.error('Failed to post comment', err);
+    } catch (err: any) {
+      setModerationError(err.message || 'Failed to post comment');
     } finally {
       setSubmitting(false);
     }
@@ -106,13 +124,28 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
                     <span className="font-bold text-slate-200">{c.authorAlias.displayName}</span>
                     <span className="text-[10px] text-slate-500">• {timeAgo(c.createdAtISO)}</span>
                   </div>
-                  <button
-                    onClick={() => onReportComment(c.id)}
-                    className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 transition-opacity"
-                    title="Report comment"
-                  >
-                    <Flag className="w-3 h-3" />
-                  </button>
+                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {onBlockUser && c.authorAlias.displayName.toLowerCase() !== currentAlias.displayName.toLowerCase() && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Block ${c.authorAlias.displayName}? You will no longer see notes or comments from this author.`)) {
+                            onBlockUser(c.authorAlias.id, c.authorAlias.displayName);
+                          }
+                        }}
+                        className="text-slate-500 hover:text-amber-400 transition-colors p-1"
+                        title={`Block ${c.authorAlias.displayName}`}
+                      >
+                        <UserX className="w-3 h-3" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onReportComment(c.id)}
+                      className="text-slate-500 hover:text-rose-400 transition-colors p-1"
+                      title="Report comment"
+                    >
+                      <Flag className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-slate-300 leading-relaxed">{c.body}</p>
               </div>
@@ -122,6 +155,13 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
 
         {/* Post Comment Input */}
         <form onSubmit={handleSubmit} className="p-4 border-t border-slate-800 bg-slate-950 space-y-2">
+          {moderationError && (
+            <div className="flex items-start gap-2 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs animate-shake">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+              <span className="leading-tight">{moderationError}</span>
+            </div>
+          )}
+
           <div className="flex items-center justify-between text-[11px] text-slate-400">
             <span>Commenting as <strong className="text-teal-400">{currentAlias.displayName}</strong></span>
             <span className="flex items-center gap-1 text-[10px] text-teal-400">
@@ -133,10 +173,17 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
             <input
               type="text"
               value={commentBody}
-              onChange={(e) => setCommentBody(e.target.value)}
+              onChange={(e) => {
+                setCommentBody(e.target.value);
+                setModerationError(null);
+              }}
               placeholder="Write an anonymous reply..."
               maxLength={300}
-              className="flex-1 px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500/50"
+              className={`flex-1 px-3.5 py-2.5 bg-slate-900 border rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none transition-colors ${
+                moderationError
+                  ? 'border-rose-500 focus:border-rose-400'
+                  : 'border-slate-800 focus:border-sky-500/50'
+              }`}
             />
             <button
               type="submit"

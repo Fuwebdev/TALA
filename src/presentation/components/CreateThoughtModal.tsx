@@ -5,6 +5,7 @@ import { Location } from '../../domain/entities/Location';
 import { Category } from '../../domain/entities/Thought';
 import { GeolocationService } from '../../application/services/GeolocationService';
 import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
+import { ModerationService } from '../../application/services/ModerationService';
 
 interface CreateThoughtModalProps {
   isOpen: boolean;
@@ -276,6 +277,18 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
     try {
       setSubmitting(true);
       setError(null);
+
+      // Multilingual AI + Local Profanity & Content Moderation Pipeline
+      const modResult = await ModerationService.evaluateText(body);
+      if (!modResult.allowed) {
+        setError(
+          modResult.message ||
+            'Your message contains inappropriate language. Please remove offensive words and try again.'
+        );
+        setSubmitting(false);
+        return;
+      }
+
       await onSubmit({
         body,
         category,
@@ -491,10 +504,17 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
             <textarea
               rows={4}
               value={body}
-              onChange={(e) => setBody(e.target.value)}
+              onChange={(e) => {
+                setBody(e.target.value);
+                setError(null);
+              }}
               placeholder="Write a note about what's happening where you are..."
               maxLength={500}
-              className="w-full p-3.5 bg-slate-950 border border-slate-800 rounded-2xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-sky-500/50 resize-none leading-relaxed"
+              className={`w-full p-3.5 bg-slate-950 border rounded-2xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none leading-relaxed transition-colors ${
+                error
+                  ? 'border-rose-500 focus:border-rose-400'
+                  : 'border-slate-800 focus:border-sky-500/50'
+              }`}
             />
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[10px] text-slate-500 gap-1 mt-1">
               <span className="flex items-center gap-1 text-teal-400 font-medium">

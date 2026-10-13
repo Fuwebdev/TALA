@@ -1,4 +1,4 @@
-import { IThoughtRepository, GetFeedFilter } from '../../domain/repositories/IThoughtRepository';
+import { IThoughtRepository, GetFeedFilter, UpdateThoughtDTO } from '../../domain/repositories/IThoughtRepository';
 import { Thought, ThoughtReactionCount } from '../../domain/entities/Thought';
 import { Comment } from '../../domain/entities/Comment';
 import { ReportReason } from '../../domain/entities/Report';
@@ -372,6 +372,172 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
     return this.fallbackMock.toggleSaveThought(thoughtId);
   }
 
+  async updateThought(thoughtId: string, params: UpdateThoughtDTO): Promise<Thought> {
+    try {
+      const { data, error } = await supabase
+        .from('thoughts')
+        .update({
+          body: params.body,
+          category: params.category,
+          is_environmental_alert: params.isEnvironmentalAlert ?? false,
+        })
+        .eq('id', thoughtId)
+        .select(`
+          id,
+          category,
+          body,
+          is_environmental_alert,
+          created_at,
+          author_alias:aliases (
+            id,
+            display_name,
+            avatar_seed,
+            badge
+          ),
+          location:cities_municipalities (
+            id,
+            name,
+            province:provinces (
+              name,
+              region:regions (
+                name
+              )
+            ),
+            latitude,
+            longitude
+          ),
+          reactions (
+            type
+          ),
+          comments (
+            id
+          )
+        `)
+        .maybeSingle();
+
+      if (error || !data) {
+        console.warn('[Supabase] updateThought fallback to mock:', error?.message);
+        return this.fallbackMock.updateThought(thoughtId, params);
+      }
+
+      await this.fallbackMock.updateThought(thoughtId, params).catch(() => {});
+
+      const item: any = data;
+      const dbReactions = Array.isArray(item.reactions) ? item.reactions : [];
+      const dbHeart = dbReactions.filter((r: any) => r.type === 'heart').length;
+      const dbRelate = dbReactions.filter((r: any) => r.type === 'relate').length;
+      const dbSupport = dbReactions.filter((r: any) => r.type === 'support').length;
+      const localBonus = this.getLocalReactionBonus(item.id);
+
+      return {
+        id: item.id,
+        authorAlias: {
+          id: item.author_alias?.id || 'anon',
+          displayName: item.author_alias?.display_name || 'AnonymousStudent',
+          avatarSeed: item.author_alias?.avatar_seed || 'Anon',
+          badge: item.author_alias?.badge,
+        },
+        category: item.category,
+        body: item.body,
+        location: {
+          id: item.location?.id || 'loc-1',
+          region: item.location?.province?.region?.name || 'Philippines',
+          province: item.location?.province?.name || 'Local Province',
+          cityMunicipality: item.location?.name || 'Local City',
+          coordinates: {
+            lat: Number(item.location?.latitude || 14.6760),
+            lng: Number(item.location?.longitude || 121.0437),
+          },
+        },
+        createdAtISO: item.created_at,
+        reactions: {
+          heart: dbHeart + localBonus.heart,
+          relate: dbRelate + localBonus.relate,
+          support: dbSupport + localBonus.support,
+        },
+        commentCount: Array.isArray(item.comments) ? item.comments.length : 0,
+        isEnvironmentalAlert: item.is_environmental_alert,
+      };
+
+    } catch (err) {
+      console.warn('[Supabase] updateThought exception, using mock fallback:', err);
+      return this.fallbackMock.updateThought(thoughtId, params);
+    }
+  }
+
+  async deleteThought(thoughtId: string): Promise<void> {
+    try {
+      await supabase.from('reactions').delete().eq('thought_id', thoughtId);
+      await supabase.from('comments').delete().eq('thought_id', thoughtId);
+      await supabase.from('saved_thoughts').delete().eq('thought_id', thoughtId);
+      await supabase.from('reports').delete().eq('target_type', 'thought').eq('target_id', thoughtId);
+      await supabase.from('thoughts').delete().eq('id', thoughtId);
+    } catch (err) {
+      console.warn('[Supabase] deleteThought exception:', err);
+    }
+    await this.fallbackMock.deleteThought(thoughtId).catch(() => {});
+  }
+
+  private static BLOCKED_STORAGE_KEY = 'tala_blocked_user_ids_v1';
+
+  private getStoredBlockedUserIds(blockerAliasId: string): string[] {
+    try {
+      const raw = localStorage.getItem(`${SupabaseThoughtRepository.BLOCKED_STORAGE_KEY}_${blockerAliasId}`);
+      if (!raw) return [];
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  private saveStoredBlockedUserIds(blockerAliasId: string, ids: string[]): void {
+    try {
+      localStorage.setItem(`${SupabaseThoughtRepository.BLOCKED_STORAGE_KEY}_${blockerAliasId}`, JSON.stringify(ids));
+    } catch {}
+  }
+
+  async blockUser(blockerAliasId: string, blockedAliasId: string): Promise<void> {
+    const list = this.getStoredBlockedUserIds(blockerAliasId);
+    if (!list.includes(blockedAliasId)) {
+      list.push(blockedAliasId);
+      this.saveStoredBlockedUserIds(blockerAliasId, list);
+    }
+    await this.fallbackMock.blockUser(blockerAliasId, blockedAliasId);
+
+    try {
+      await supabase.from('user_blocks').insert({
+        blocker_alias_id: blockerAliasId,
+        blocked_alias_id: blockedAliasId,
+      });
+    } catch {}
+  }
+
+  async unblockUser(blockerAliasId: string, blockedAliasId: string): Promise<void> {
+    const list = this.getStoredBlockedUserIds(blockerAliasId).filter(id => id !== blockedAliasId);
+    this.saveStoredBlockedUserIds(blockerAliasId, list);
+    await this.fallbackMock.unblockUser(blockerAliasId, blockedAliasId);
+
+    try {
+      await supabase.from('user_blocks').delete()
+        .eq('blocker_alias_id', blockerAliasId)
+        .eq('blocked_alias_id', blockedAliasId);
+    } catch {}
+  }
+
+  async getBlockedUserIds(blockerAliasId: string): Promise<string[]> {
+    const localList = this.getStoredBlockedUserIds(blockerAliasId);
+    try {
+      const { data } = await supabase.from('user_blocks').select('blocked_alias_id').eq('blocker_alias_id', blockerAliasId);
+      if (data && data.length > 0) {
+        const dbIds = data.map((d: any) => d.blocked_alias_id);
+        const merged = Array.from(new Set([...localList, ...dbIds]));
+        this.saveStoredBlockedUserIds(blockerAliasId, merged);
+        return merged;
+      }
+    } catch {}
+    return localList;
+  }
+
   async reportContent(targetType: 'thought' | 'comment', targetId: string, reason: ReportReason, details?: string): Promise<void> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -391,3 +557,4 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
     }
   }
 }
+

@@ -21,7 +21,7 @@
   ],
   "rewrites": [
     {
-      "source": "/((?!assets/|app-icon/|icon-192\\.png|icon-512\\.png|manifest\\.json|sw\\.js|favicon\\.svg).*)",
+      "source": "/((?!api/|assets/|app-icon/|icon-192\\.png|icon-512\\.png|manifest\\.json|sw\\.js|favicon\\.svg).*)",
       "destination": "/index.html"
     }
   ]

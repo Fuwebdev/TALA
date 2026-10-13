@@ -30,13 +30,18 @@ import { runDomainVerificationTests } from '../../test/domain.test';
 // Use Cases
 import { GetFeedUseCase } from '../../application/use-cases/GetFeedUseCase';
 import { CreateThoughtUseCase } from '../../application/use-cases/CreateThoughtUseCase';
+import { UpdateThoughtUseCase } from '../../application/use-cases/UpdateThoughtUseCase';
+import { DeleteThoughtUseCase } from '../../application/use-cases/DeleteThoughtUseCase';
+import { BlockUserUseCase } from '../../application/use-cases/BlockUserUseCase';
 import { GetWeatherUseCase } from '../../application/use-cases/GetWeatherUseCase';
 import { GetCommentsUseCase } from '../../application/use-cases/GetCommentsUseCase';
 import { AddCommentUseCase } from '../../application/use-cases/AddCommentUseCase';
 import { ReportContentUseCase } from '../../application/use-cases/ReportContentUseCase';
 import { ToggleSaveThoughtUseCase } from '../../application/use-cases/ToggleSaveThoughtUseCase';
+import { EditThoughtModal } from '../components/EditThoughtModal';
 
 import { Sparkles, RefreshCw, MessageSquare, Compass, Navigation, MapPin, PlusCircle, CheckCircle2, User } from 'lucide-react';
+
 
 export const HomePage: React.FC = () => {
   // Clean Architecture Repositories & Services
@@ -48,6 +53,9 @@ export const HomePage: React.FC = () => {
   // Use Cases
   const getFeedUseCase = useMemo(() => new GetFeedUseCase(thoughtRepo), [thoughtRepo]);
   const createThoughtUseCase = useMemo(() => new CreateThoughtUseCase(thoughtRepo), [thoughtRepo]);
+  const updateThoughtUseCase = useMemo(() => new UpdateThoughtUseCase(thoughtRepo), [thoughtRepo]);
+  const deleteThoughtUseCase = useMemo(() => new DeleteThoughtUseCase(thoughtRepo), [thoughtRepo]);
+  const blockUserUseCase = useMemo(() => new BlockUserUseCase(thoughtRepo), [thoughtRepo]);
   const getWeatherUseCase = useMemo(() => new GetWeatherUseCase(weatherGateway), [weatherGateway]);
   const getCommentsUseCase = useMemo(() => new GetCommentsUseCase(thoughtRepo), [thoughtRepo]);
   const addCommentUseCase = useMemo(() => new AddCommentUseCase(thoughtRepo), [thoughtRepo]);
@@ -153,6 +161,17 @@ export const HomePage: React.FC = () => {
   const [loadingComments, setLoadingComments] = useState<boolean>(false);
 
   const [reportTarget, setReportTarget] = useState<{ type: 'thought' | 'comment'; id: string } | null>(null);
+
+  // Note Edit Modal & User Blocking State
+  const [editingThought, setEditingThought] = useState<Thought | null>(null);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('tala_blocked_aliases_v1');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Initialize Session, Service Worker, and Domain Verification Tests
   useEffect(() => {
@@ -351,6 +370,26 @@ export const HomePage: React.FC = () => {
     setCurrentAlias(updatedAlias);
   };
 
+  // Sync blocked IDs from repository on alias change
+  useEffect(() => {
+    blockUserUseCase.getBlockedUserIds(currentAlias.id).then((ids) => {
+      if (ids && ids.length > 0) {
+        setBlockedUserIds((prev) => {
+          const merged = Array.from(new Set([...prev, ...ids]));
+          try {
+            localStorage.setItem('tala_blocked_aliases_v1', JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+    });
+  }, [currentAlias.id, blockUserUseCase]);
+
+  const isAuthorBlocked = (author: { id: string; displayName: string }) => {
+    const name = author.displayName.toLowerCase();
+    return blockedUserIds.some((b) => b.toLowerCase() === name || b === author.id);
+  };
+
   // Load Feed & User's Own Notes
   const loadFeed = async () => {
     try {
@@ -360,9 +399,11 @@ export const HomePage: React.FC = () => {
       const allData = await getFeedUseCase.execute({});
       const now = Date.now();
       const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-      const unexpiredAll = allData.filter(
+      let unexpiredAll = allData.filter(
         (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
       );
+      // Filter out blocked authors
+      unexpiredAll = unexpiredAll.filter((t) => !isAuthorBlocked(t.authorAlias));
       setAllThoughtsForUser(unexpiredAll);
 
       const feedData = await getFeedUseCase.execute({
@@ -374,6 +415,9 @@ export const HomePage: React.FC = () => {
       let filtered = feedData.filter(
         (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
       );
+      // Filter out blocked authors
+      filtered = filtered.filter((t) => !isAuthorBlocked(t.authorAlias));
+
       if (viewOnlyMyNotes) {
         filtered = filtered.filter(
           (t) =>
@@ -400,7 +444,8 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     loadFeed();
-  }, [selectedLocation, selectedCategory, searchQuery, sortBy, viewOnlyMyNotes, currentAlias]);
+  }, [selectedLocation, selectedCategory, searchQuery, sortBy, viewOnlyMyNotes, currentAlias, blockedUserIds]);
+
 
   // All notes posted by the current cached user (only unexpired active notes)
   const myNotes = useMemo(() => {
@@ -530,6 +575,69 @@ export const HomePage: React.FC = () => {
     );
     await loadFeed();
   };
+
+  const handleEditThought = (thought: Thought) => {
+    setEditingThought(thought);
+  };
+
+  const handleSaveUpdatedThought = async (
+    thoughtId: string,
+    params: { body: string; category: Category; isEnvironmentalAlert: boolean }
+  ) => {
+    const updated = await updateThoughtUseCase.execute(thoughtId, params);
+    setThoughts((prev) => prev.map((t) => (t.id === thoughtId ? updated : t)));
+    setAllThoughtsForUser((prev) => prev.map((t) => (t.id === thoughtId ? updated : t)));
+    setLocationBannerMsg('Your note was updated successfully!');
+  };
+
+  const handleDeleteThought = async (thoughtId: string) => {
+    await deleteThoughtUseCase.execute(thoughtId);
+    setThoughts((prev) => prev.filter((t) => t.id !== thoughtId));
+    setAllThoughtsForUser((prev) => prev.filter((t) => t.id !== thoughtId));
+    if (activeThoughtForComments?.id === thoughtId) {
+      setActiveThoughtForComments(null);
+    }
+    setLocationBannerMsg('Your note has been deleted.');
+  };
+
+  const handleBlockUser = async (aliasId: string, aliasDisplayName: string) => {
+    await blockUserUseCase.block(currentAlias.id, aliasDisplayName);
+    if (aliasId && aliasId !== 'anon') {
+      await blockUserUseCase.block(currentAlias.id, aliasId);
+    }
+    const updated = Array.from(new Set([...blockedUserIds, aliasDisplayName, aliasId].filter(Boolean)));
+    setBlockedUserIds(updated);
+    try {
+      localStorage.setItem('tala_blocked_aliases_v1', JSON.stringify(updated));
+    } catch {}
+    setThoughts((prev) =>
+      prev.filter(
+        (t) =>
+          t.authorAlias.displayName.toLowerCase() !== aliasDisplayName.toLowerCase() &&
+          t.authorAlias.id !== aliasId
+      )
+    );
+    setAllThoughtsForUser((prev) =>
+      prev.filter(
+        (t) =>
+          t.authorAlias.displayName.toLowerCase() !== aliasDisplayName.toLowerCase() &&
+          t.authorAlias.id !== aliasId
+      )
+    );
+    setLocationBannerMsg(`Blocked ${aliasDisplayName}. Their notes and comments are hidden.`);
+  };
+
+  const handleUnblockUser = async (aliasIdOrName: string) => {
+    await blockUserUseCase.unblock(currentAlias.id, aliasIdOrName);
+    const updated = blockedUserIds.filter((b) => b !== aliasIdOrName);
+    setBlockedUserIds(updated);
+    try {
+      localStorage.setItem('tala_blocked_aliases_v1', JSON.stringify(updated));
+    } catch {}
+    setLocationBannerMsg(`Unblocked ${aliasIdOrName}.`);
+    await loadFeed();
+  };
+
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
@@ -693,6 +801,13 @@ export const HomePage: React.FC = () => {
                 <ThoughtCard
                   key={thought.id}
                   thought={thought}
+                  isAuthor={
+                    thought.authorAlias.displayName.toLowerCase() === currentAlias.displayName.toLowerCase() ||
+                    thought.authorAlias.id === currentAlias.id
+                  }
+                  onEdit={handleEditThought}
+                  onDelete={handleDeleteThought}
+                  onBlockAuthor={(t) => handleBlockUser(t.authorAlias.id, t.authorAlias.displayName)}
                   onReact={async (id, type) => {
                     // Optimistic UI update so reaction increments immediately
                     setThoughts(prev =>
@@ -715,6 +830,7 @@ export const HomePage: React.FC = () => {
                 />
               ))}
             </div>
+
           )}
 
         </section>
@@ -776,6 +892,7 @@ export const HomePage: React.FC = () => {
         }}
         currentAlias={currentAlias}
         userNotes={myNotes}
+        blockedUserIds={blockedUserIds}
         onSaveUsername={handleSaveUsername}
         onRequestLocation={handleAllowUserLocation}
         onRequestIpLocation={handleAllowNetworkLocation}
@@ -789,6 +906,9 @@ export const HomePage: React.FC = () => {
           setSelectedLocation(thought.location);
           handleOpenComments(thought);
         }}
+        onEditNote={handleEditThought}
+        onDeleteNote={handleDeleteThought}
+        onUnblockUser={handleUnblockUser}
       />
 
       <CreateThoughtModal
@@ -803,16 +923,26 @@ export const HomePage: React.FC = () => {
         onSubmit={handleCreateThought}
       />
 
+      <EditThoughtModal
+        isOpen={Boolean(editingThought)}
+        onClose={() => setEditingThought(null)}
+        thought={editingThought}
+        onUpdate={handleSaveUpdatedThought}
+        onDelete={handleDeleteThought}
+      />
+
       <CommentsDrawer
         isOpen={Boolean(activeThoughtForComments)}
         onClose={() => setActiveThoughtForComments(null)}
         thought={activeThoughtForComments}
         currentAlias={currentAlias}
-        comments={comments}
+        comments={comments.filter(c => !isAuthorBlocked(c.authorAlias))}
         loading={loadingComments}
         onAddComment={handleAddComment}
         onReportComment={(commentId) => setReportTarget({ type: 'comment', id: commentId })}
+        onBlockUser={(aliasId, aliasName) => handleBlockUser(aliasId, aliasName)}
       />
+
 
       <ReportModal
         isOpen={Boolean(reportTarget)}

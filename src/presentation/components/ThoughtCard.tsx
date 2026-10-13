@@ -1,24 +1,32 @@
 import React, { useState } from 'react';
-import { Heart, MessageSquare, MapPin, AlertTriangle, Share2, Award, Bookmark, Flag } from 'lucide-react';
+import { Heart, MessageSquare, MapPin, AlertTriangle, Share2, Award, Bookmark, Flag, Edit3, Trash2, UserX } from 'lucide-react';
 import { Thought } from '../../domain/entities/Thought';
 import { formatLocationName } from '../../domain/entities/Location';
 
 interface ThoughtCardProps {
   thought: Thought;
+  isAuthor?: boolean;
   onReact: (thoughtId: string, reactionType: 'heart' | 'relate' | 'support') => void;
   onOpenComments: (thought: Thought) => void;
   onToggleSave: (thoughtId: string) => Promise<void>;
   onReport: (thought: Thought) => void;
   onSelectLocation?: (locationId: string) => void;
+  onEdit?: (thought: Thought) => void;
+  onDelete?: (thoughtId: string) => void;
+  onBlockAuthor?: (thought: Thought) => void;
 }
 
 export const ThoughtCard: React.FC<ThoughtCardProps> = ({
   thought,
+  isAuthor = false,
   onReact,
   onOpenComments,
   onToggleSave,
   onReport,
   onSelectLocation,
+  onEdit,
+  onDelete,
+  onBlockAuthor,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -117,7 +125,7 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
           </div>
         </div>
 
-        {/* Right: Category Badge & Environmental Alert */}
+        {/* Right: Category Badge, Environmental Alert, and Author CRUD Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
           {thought.isEnvironmentalAlert && (
             <span className="hidden xs:inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full">
@@ -128,8 +136,36 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
           <span className={`px-2.5 py-0.5 text-[10px] sm:text-[11px] font-semibold rounded-full border whitespace-nowrap ${getCategoryBadgeClass(thought.category)}`}>
             {thought.category}
           </span>
+
+          {isAuthor && (
+            <div className="flex items-center gap-1 ml-1 pl-1 border-l border-slate-800">
+              {onEdit && (
+                <button
+                  onClick={() => onEdit(thought)}
+                  className="p-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 transition-colors"
+                  title="Edit your note"
+                >
+                  <Edit3 className="w-3 h-3" />
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  onClick={() => {
+                    if (window.confirm('Are you sure you want to delete this note?')) {
+                      onDelete(thought.id);
+                    }
+                  }}
+                  className="p-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 transition-colors"
+                  title="Delete your note"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
 
       {/* Body Content */}
       <p className="text-xs sm:text-sm text-slate-200 leading-relaxed my-3 whitespace-pre-line font-normal break-words">
@@ -185,6 +221,20 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
             <Bookmark className="w-3.5 h-3.5 shrink-0" />
           </button>
 
+          {!isAuthor && onBlockAuthor && (
+            <button
+              onClick={() => {
+                if (window.confirm(`Block ${thought.authorAlias.displayName}? You will no longer see notes or comments from this author.`)) {
+                  onBlockAuthor(thought);
+                }
+              }}
+              className="p-1.5 rounded-xl hover:bg-slate-800 hover:text-amber-400 transition-colors"
+              title={`Block ${thought.authorAlias.displayName}`}
+            >
+              <UserX className="w-3.5 h-3.5 shrink-0" />
+            </button>
+          )}
+
           <button
             onClick={() => onReport(thought)}
             className="p-1.5 rounded-xl hover:bg-slate-800 hover:text-rose-400 transition-colors"
@@ -192,6 +242,7 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
           >
             <Flag className="w-3.5 h-3.5 shrink-0" />
           </button>
+
 
           <button
             onClick={handleShare}
