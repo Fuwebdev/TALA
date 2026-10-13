@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Monolithic';
+  src: local('Monolithic'), local('Century Gothic'), local('CenturyGothic'),
+       url('https://fonts.gstatic.com/s/jost/v15/92zPtBhPNqw79Ij1E865zBUv7myjJTVBNIg.woff2') format('woff2');
+  font-display: swap;
+}
+
+@layer base {
+  html,
+  body,
+  *,
+  *::before,
+  *::after,
+  input,
+  button,
+  textarea,
+  select {
+    font-family: 'Monolithic', 'Century Gothic', 'CenturyGothic PanEuropean', CenturyGothic, 'Jost', 'Questrial', AppleGothic, sans-serif !important;
+  }
+
+  body {
+    background-color: #030712;
+    color: #f8fafc;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+/* Force Monolithic font across Mobile Preview, DevTools Mobile Emulation & Touch Viewports */
+@media only screen and (max-width: 1024px), (hover: none) and (pointer: coarse) {
+  html,
+  body,
+  #root,
+  *,
+  *::before,
+  *::after,
+  h1, h2, h3, h4, h5, h6,
+  p, span, a, div, label,
+  input, button, textarea, select, option {
+    font-family: 'Monolithic', 'Century Gothic', 'CenturyGothic PanEuropean', CenturyGothic, 'Jost', 'Questrial', AppleGothic, sans-serif !important;
+    letter-spacing: 0.01em;
+  }
+}
+
+/* Custom scrollbar for clean dark UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* MapLibre dark theme popup overrides */
+.tala-map-popup .maplibre-popup-content,
+.maplibregl-popup-content {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+  border: 1px solid #38bdf8 !important;
+  border-radius: 16px !important;
+  padding: 4px !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7) !important;
+  font-family: 'Monolithic', 'Century Gothic', CenturyGothic, 'Jost', sans-serif !important;
+}
+
+.tala-map-popup .maplibre-popup-tip,
+.maplibregl-popup-tip {
+  border-top-color: #38bdf8 !important;
+  border-bottom-color: #38bdf8 !important;
+}
