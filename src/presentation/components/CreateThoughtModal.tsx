@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Sparkles, MapPin, AlertTriangle, ShieldCheck, Navigation, CheckCircle2 } from 'lucide-react';
+import { X, Sparkles, MapPin, AlertTriangle, ShieldCheck, Navigation, CheckCircle2, Search, Globe } from 'lucide-react';
 import { Alias } from '../../domain/entities/Alias';
 import { Location } from '../../domain/entities/Location';
 import { Category } from '../../domain/entities/Thought';
 import { GeolocationService } from '../../application/services/GeolocationService';
+import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
 
 interface CreateThoughtModalProps {
   isOpen: boolean;
@@ -49,11 +50,17 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   const [detectingGps, setDetectingGps] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
 
+  // Manual place search fallback if user's browser blocks GPS
+  const [showPlaceSearch, setShowPlaceSearch] = useState(false);
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [searchedPlaces, setSearchedPlaces] = useState<Location[]>([]);
+  const [searchingPlace, setSearchingPlace] = useState(false);
+
   // Base reference coordinates (user's exact GPS or initial selected location)
   const anchorCoords = useMemo(() => {
+    if (location?.coordinates) return location.coordinates;
     if (userGpsCoords) return userGpsCoords;
     if (initialLocation?.coordinates) return initialLocation.coordinates;
-    if (location?.coordinates) return location.coordinates;
     return null;
   }, [userGpsCoords, initialLocation, location]);
 
@@ -68,6 +75,29 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
       setLocalNearby5km(nearbyLocations);
     }
   }, [nearbyLocations]);
+
+  // Debounced search for Philippine barangays/cities
+  useEffect(() => {
+    const q = placeQuery.trim();
+    if (q.length < 2) {
+      setSearchedPlaces([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchingPlace(true);
+      try {
+        const res = await GeolocationService.searchPhilippinePlaces(q);
+        setSearchedPlaces(res);
+      } catch {
+        setSearchedPlaces([]);
+      } finally {
+        setSearchingPlace(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [placeQuery]);
 
   // Automatically fetch 5km nearby addresses when modal opens if not yet populated
   useEffect(() => {
@@ -92,36 +122,25 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
     }
   }, [isOpen, initialLocation]);
 
-  // Build dropdown list with ONLY Current Location + Nearby Locations within 5km radius (All Hooks above early return)
+  // Build dropdown list with Current Location + Nearby Locations within 5km radius
   const nearbyDropdownOptions = useMemo(() => {
-    const baseLoc = initialLocation || location;
-    if (!baseLoc || !anchorCoords) return [];
+    const baseLoc = location || initialLocation;
+    if (!baseLoc || !anchorCoords) {
+      return PHILIPPINE_LOCATIONS.map((loc, idx) => ({
+        loc,
+        distKm: 0,
+        isCurrent: idx === 0,
+      }));
+    }
 
     const optionsMap = new Map<string, { loc: Location; distKm: number; isCurrent: boolean }>();
 
-    // 1. Always put Current Location first (0.0 km)
+    // 1. Always put Current/Selected Location first (0.0 km)
     optionsMap.set(baseLoc.cityMunicipality.toLowerCase().trim(), {
       loc: baseLoc,
       distKm: 0,
       isCurrent: true,
     });
-
-    // If user selected one of the nearby options, ensure it's also in the map
-    if (location && location.id !== baseLoc.id) {
-      const d = GeolocationService.calculateDistanceKm(
-        anchorCoords.lat,
-        anchorCoords.lng,
-        location.coordinates.lat,
-        location.coordinates.lng
-      );
-      if (d <= 5.0) {
-        optionsMap.set(location.cityMunicipality.toLowerCase().trim(), {
-          loc: location,
-          distKm: d,
-          isCurrent: false,
-        });
-      }
-    }
 
     // 2. Add fetched nearby addresses within 5km radius
     const candidates = [...localNearby5km, ...locations];
@@ -134,7 +153,6 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
         item.coordinates.lng
       );
 
-      // Strictly filter out anything outside 5km radius
       if (distKm <= 5.0) {
         const key = item.cityMunicipality.toLowerCase().trim();
         if (!optionsMap.has(key)) {
@@ -172,13 +190,74 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
       }
       setLocation(persistedLoc);
       setLocalNearby5km(result.nearbyLocations);
+      setShowPlaceSearch(false);
       setGpsStatus(
         `Current location & ${result.nearbyLocations.length} nearby addresses (within 5km) loaded`
       );
     } catch (err: any) {
-      setError(err.message || 'Unable to detect your exact location.');
+      setShowPlaceSearch(true);
+      setError(
+        err.message ||
+          'Browser GPS unavailable. You can search or pick your barangay/city below.'
+      );
     } finally {
       setDetectingGps(false);
+    }
+  };
+
+  const handleUseNetworkLocation = async () => {
+    setDetectingGps(true);
+    setError(null);
+    setGpsStatus(null);
+    try {
+      const result = await GeolocationService.detectApproxLocationByIp();
+      let persistedLoc = result.exactLocation;
+      if (onExactLocationDetected) {
+        persistedLoc = await onExactLocationDetected(
+          result.exactLocation,
+          result.coords,
+          result.nearbyLocations
+        );
+      }
+      setLocation(persistedLoc);
+      setLocalNearby5km(result.nearbyLocations);
+      setShowPlaceSearch(false);
+      setGpsStatus(
+        `Network location & ${result.nearbyLocations.length} nearby addresses (within 5km) loaded`
+      );
+    } catch (err: any) {
+      setShowPlaceSearch(true);
+      setError(err.message || 'Please search or select your city/barangay below.');
+    } finally {
+      setDetectingGps(false);
+    }
+  };
+
+  const handleSelectManualPlace = async (picked: Location) => {
+    setLoadingNearby(true);
+    setError(null);
+    try {
+      const nearby = await GeolocationService.getNearbyLocationsWithin5km(
+        picked.coordinates.lat,
+        picked.coordinates.lng,
+        picked
+      );
+      let persistedLoc = picked;
+      if (onExactLocationDetected) {
+        persistedLoc = await onExactLocationDetected(picked, picked.coordinates, nearby);
+      }
+      setLocation(persistedLoc);
+      setLocalNearby5km(nearby);
+      setShowPlaceSearch(false);
+      setPlaceQuery('');
+      setGpsStatus(
+        `Selected ${persistedLoc.cityMunicipality} (+${nearby.length} nearby within 5km)`
+      );
+    } catch {
+      setLocation(picked);
+      setShowPlaceSearch(false);
+    } finally {
+      setLoadingNearby(false);
     }
   };
 
@@ -190,7 +269,7 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
     }
     const targetLocation = location || nearbyDropdownOptions[0]?.loc;
     if (!targetLocation) {
-      setError('Please allow your location first to select your current or nearby 5km address.');
+      setError('Please select your current or nearby location above.');
       return;
     }
 
@@ -214,6 +293,21 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   };
 
   const categories: Category[] = ['Thoughts', 'School', 'Life', 'Community', 'Environment'];
+
+  const manualCandidates = [
+    ...searchedPlaces,
+    ...PHILIPPINE_LOCATIONS.filter((p) =>
+      placeQuery.trim()
+        ? p.cityMunicipality.toLowerCase().includes(placeQuery.toLowerCase()) ||
+          p.province.toLowerCase().includes(placeQuery.toLowerCase())
+        : true
+    ).filter(
+      (p) =>
+        !searchedPlaces.some(
+          (s) => s.cityMunicipality.toLowerCase() === p.cityMunicipality.toLowerCase()
+        )
+    ),
+  ].slice(0, 10);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn overflow-y-auto">
@@ -245,7 +339,7 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
           
           {/* Step 1: Current Location & Nearby 5km Radius Dropdown */}
           <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 text-sky-400" />
@@ -256,15 +350,26 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={handleUseMyCurrentLocation}
-                disabled={detectingGps}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-[11px] font-semibold transition-all disabled:opacity-50 shrink-0"
-              >
-                <Navigation className={`w-3 h-3 text-sky-400 ${detectingGps ? 'animate-spin' : ''}`} />
-                <span>{detectingGps ? 'Detecting...' : 'Refresh GPS'}</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowPlaceSearch((prev) => !prev)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-semibold transition-all"
+                >
+                  <Search className="w-3 h-3 text-teal-400" />
+                  <span>{showPlaceSearch ? 'Hide Search' : 'Search Place'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleUseMyCurrentLocation}
+                  disabled={detectingGps}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-[11px] font-semibold transition-all disabled:opacity-50 shrink-0"
+                >
+                  <Navigation className={`w-3 h-3 text-sky-400 ${detectingGps ? 'animate-spin' : ''}`} />
+                  <span>{detectingGps ? 'Detecting...' : 'Refresh GPS'}</span>
+                </button>
+              </div>
             </div>
 
             {gpsStatus && (
@@ -274,9 +379,60 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
               </div>
             )}
 
+            {showPlaceSearch && (
+              <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold text-slate-300">
+                    Can't allow GPS? Search any PH barangay or city:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleUseNetworkLocation}
+                    disabled={detectingGps}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-300 text-[10px] font-semibold"
+                  >
+                    <Globe className="w-3 h-3" />
+                    <span>Detect via Network</span>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={placeQuery}
+                    onChange={(e) => setPlaceQuery(e.target.value)}
+                    placeholder="Type barangay, city, or municipality..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500/50"
+                  />
+                </div>
+
+                {searchingPlace && (
+                  <p className="text-[10px] text-sky-400 animate-pulse">Searching Philippine locations...</p>
+                )}
+
+                <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
+                  {manualCandidates.map((item) => (
+                    <button
+                      key={`${item.id}-${item.cityMunicipality}`}
+                      type="button"
+                      onClick={() => handleSelectManualPlace(item)}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-950/80 hover:bg-sky-500/15 border border-slate-800/80 text-left text-xs transition-all"
+                    >
+                      <div>
+                        <span className="font-medium text-slate-200 block">{item.cityMunicipality}</span>
+                        <span className="text-[10px] text-slate-400">{item.province}</span>
+                      </div>
+                      <span className="text-[10px] text-sky-400 font-semibold">Use →</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="relative">
               <select
-                value={location?.id || ''}
+                value={location?.id || nearbyDropdownOptions[0]?.loc.id || ''}
                 onChange={(e) => {
                   const found = nearbyDropdownOptions.find((entry) => entry.loc.id === e.target.value);
                   if (found) {
@@ -287,12 +443,12 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
                 className="w-full px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-sky-500/50"
               >
                 {nearbyDropdownOptions.length === 0 ? (
-                  <option value="">Click "Refresh GPS" to detect your current & 5km nearby addresses...</option>
+                  <option value="">Click "Refresh GPS" or "Search Place" above...</option>
                 ) : (
                   nearbyDropdownOptions.map(({ loc, distKm, isCurrent }) => (
                     <option key={loc.id} value={loc.id}>
                       {isCurrent
-                        ? `📍 [Current Location] ${loc.cityMunicipality}, ${loc.province}`
+                        ? `📍 [Selected Area] ${loc.cityMunicipality}, ${loc.province}`
                         : `🧭 [${distKm.toFixed(1)} km away] ${loc.cityMunicipality}, ${loc.province}`}
                     </option>
                   ))

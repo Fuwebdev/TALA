@@ -131,6 +131,7 @@ export const HomePage: React.FC = () => {
 
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [locationBannerMsg, setLocationBannerMsg] = useState<string | null>(null);
+  const [lastLocationError, setLastLocationError] = useState<string | null>(null);
 
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [allThoughtsForUser, setAllThoughtsForUser] = useState<Thought[]>([]);
@@ -142,6 +143,7 @@ export const HomePage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'latest' | 'trending'>('latest');
+  const [highlightedThoughtId, setHighlightedThoughtId] = useState<string | null>(null);
 
   // Modals & Drawers State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
@@ -174,6 +176,7 @@ export const HomePage: React.FC = () => {
   ): Promise<Location> => {
     const persisted = await locationRepo.ensureLocationPersisted(exactLoc);
     setUserGpsCoords(coords);
+    setLastLocationError(null);
 
     const resolvedNearby =
       nearby5km && nearby5km.length > 0
@@ -190,7 +193,16 @@ export const HomePage: React.FC = () => {
       // Ignore storage error
     }
 
-    setLocations([persisted, ...resolvedNearby]);
+    setLocations((prev) => {
+      const combined = [persisted, ...resolvedNearby, ...prev];
+      const seen = new Set<string>();
+      return combined.filter((item) => {
+        const key = `${item.cityMunicipality.toLowerCase()}|${item.province.toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    });
     setSelectedLocation(persisted);
     return persisted;
   };
@@ -199,6 +211,7 @@ export const HomePage: React.FC = () => {
   const handleAllowUserLocation = async (): Promise<Location | null> => {
     setIsLocating(true);
     setLocationBannerMsg(null);
+    setLastLocationError(null);
     try {
       const result = await GeolocationService.detectUserLocation();
       const persistedLoc = await registerExactLocation(
@@ -206,13 +219,66 @@ export const HomePage: React.FC = () => {
         result.coords,
         result.nearbyLocations
       );
+      const sourceLabel = result.source === 'ip' ? 'Network location' : 'Exact location';
       setLocationBannerMsg(
-        `Exact location detected: ${persistedLoc.cityMunicipality}, ${persistedLoc.province} (+${result.nearbyLocations.length} nearby within 5km)`
+        `${sourceLabel} detected: ${persistedLoc.cityMunicipality}, ${persistedLoc.province} (+${result.nearbyLocations.length} nearby within 5km)`
       );
       return persistedLoc;
     } catch (err: any) {
-      setLocationBannerMsg(err.message || 'Could not detect your exact location.');
+      const msg = err.message || 'Could not detect your exact location.';
+      setLastLocationError(msg);
+      setLocationBannerMsg(msg);
       return null;
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  // Fallback Network / IP Location when browser GPS permission is blocked or unavailable
+  const handleAllowNetworkLocation = async (): Promise<Location | null> => {
+    setIsLocating(true);
+    setLocationBannerMsg(null);
+    setLastLocationError(null);
+    try {
+      const result = await GeolocationService.detectApproxLocationByIp();
+      const persistedLoc = await registerExactLocation(
+        result.exactLocation,
+        result.coords,
+        result.nearbyLocations
+      );
+      setLocationBannerMsg(
+        `Network location detected: ${persistedLoc.cityMunicipality}, ${persistedLoc.province} (+${result.nearbyLocations.length} nearby within 5km)`
+      );
+      return persistedLoc;
+    } catch (err: any) {
+      const msg = err.message || 'Could not detect network location.';
+      setLastLocationError(msg);
+      setLocationBannerMsg(msg);
+      return null;
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  // Manual Barangay / City Selection Fallback
+  const handleSelectManualLocation = async (manualLoc: Location): Promise<Location> => {
+    setIsLocating(true);
+    setLastLocationError(null);
+    try {
+      const nearby = await GeolocationService.getNearbyLocationsWithin5km(
+        manualLoc.coordinates.lat,
+        manualLoc.coordinates.lng,
+        manualLoc
+      );
+      const persistedLoc = await registerExactLocation(
+        manualLoc,
+        manualLoc.coordinates,
+        nearby
+      );
+      setLocationBannerMsg(
+        `Location set to: ${persistedLoc.cityMunicipality}, ${persistedLoc.province} (+${nearby.length} nearby within 5km)`
+      );
+      return persistedLoc;
     } finally {
       setIsLocating(false);
     }
@@ -245,27 +311,36 @@ export const HomePage: React.FC = () => {
             // Ignore
           }
         }
-        setLocations([cachedLoc, ...cachedNearby]);
+        const merged = [cachedLoc, ...cachedNearby, ...data];
+        const seen = new Set<string>();
+        setLocations(
+          merged.filter((item) => {
+            const key = `${item.cityMunicipality.toLowerCase()}|${item.province.toLowerCase()}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+        );
         setSelectedLocation(cachedLoc);
-
-        // Refresh live GPS coordinates silently if permission is granted
-        if ('permissions' in navigator && navigator.permissions?.query) {
-          navigator.permissions
-            .query({ name: 'geolocation' as PermissionName })
-            .then((status) => {
-              if (status.state === 'granted') {
-                handleAllowUserLocation();
-              }
-            })
-            .catch(() => {});
-        }
       } else {
-        // Try detecting user's real GPS location + 5km nearby addresses first
-        const detected = await handleAllowUserLocation();
-        if (!detected && data.length > 0) {
-          setLocations([data[0]]);
+        // Populate full Philippine locations list so user always has locations even before/without GPS
+        setLocations(data);
+        if (data.length > 0) {
           setSelectedLocation((prev) => prev || data[0]);
         }
+      }
+
+      // Only auto-refresh GPS silently on mount if browser permission is ALREADY granted
+      // (Avoids triggering an unprompted GPS request before the user clicks "Allow Location")
+      if ('permissions' in navigator && navigator.permissions?.query) {
+        navigator.permissions
+          .query({ name: 'geolocation' as PermissionName })
+          .then((status) => {
+            if (status.state === 'granted') {
+              handleAllowUserLocation();
+            }
+          })
+          .catch(() => {});
       }
     });
   }, [locationRepo]);
@@ -328,6 +403,14 @@ export const HomePage: React.FC = () => {
         t.authorAlias.id === currentAlias.id
     );
   }, [allThoughtsForUser, currentAlias]);
+
+  // Combined thoughts across the entire Philippines so ALL notes display on the map with lollipop icons, even outside the current radius
+  const allMapThoughts = useMemo(() => {
+    const map = new Map<string, Thought>();
+    allThoughtsForUser.forEach((t) => map.set(t.id, t));
+    thoughts.forEach((t) => map.set(t.id, t));
+    return Array.from(map.values());
+  }, [allThoughtsForUser, thoughts]);
 
   // Weather fetch via Open-Meteo using exact location coordinates
   useEffect(() => {
@@ -392,7 +475,7 @@ export const HomePage: React.FC = () => {
     const persistedLocation = await locationRepo.ensureLocationPersisted(params.location);
     const aiAnalysis = await aiGateway.analyzeThoughtText(params.body);
 
-    await createThoughtUseCase.execute({
+    const createdThought = await createThoughtUseCase.execute({
       authorAlias: currentAlias,
       category: params.category,
       body: params.body,
@@ -400,7 +483,14 @@ export const HomePage: React.FC = () => {
       isEnvironmentalAlert: params.isEnvironmentalAlert || Boolean(aiAnalysis.environmentalCategory),
     });
 
+    // Immediately add to all thoughts lists so it appears on the map right away, even if far away
+    setAllThoughtsForUser((prev) => [createdThought, ...prev.filter((t) => t.id !== createdThought.id)]);
+    setThoughts((prev) => [createdThought, ...prev.filter((t) => t.id !== createdThought.id)]);
     setSelectedLocation(persistedLocation);
+    setHighlightedThoughtId(createdThought.id);
+    setLocationBannerMsg(
+      `Note dropped! Lollipop pin & note bubble popped up on the map in ${persistedLocation.cityMunicipality}, ${persistedLocation.province}`
+    );
     await loadFeed();
   };
 
@@ -603,11 +693,15 @@ export const HomePage: React.FC = () => {
             </h3>
             <MapView
               locations={locations}
-              thoughts={thoughts}
+              thoughts={allMapThoughts}
               selectedLocation={selectedLocation}
               userGpsCoords={userGpsCoords}
+              highlightedThoughtId={highlightedThoughtId}
               onSelectLocation={(loc) => setSelectedLocation(loc)}
-              onSelectThought={(thought) => handleOpenComments(thought)}
+              onSelectThought={(thought) => {
+                setHighlightedThoughtId(thought.id);
+                handleOpenComments(thought);
+              }}
               onRequestGeoLocation={handleAllowUserLocation}
               isLocating={isLocating}
             />
@@ -647,6 +741,10 @@ export const HomePage: React.FC = () => {
         userNotes={myNotes}
         onSaveUsername={handleSaveUsername}
         onRequestLocation={handleAllowUserLocation}
+        onRequestIpLocation={handleAllowNetworkLocation}
+        onSelectManualLocation={handleSelectManualLocation}
+        availableLocations={locations}
+        lastLocationError={lastLocationError}
         isLocating={isLocating}
         detectedLocation={selectedLocation}
         hasGpsCoords={Boolean(userGpsCoords)}

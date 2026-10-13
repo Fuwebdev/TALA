@@ -10,6 +10,7 @@ interface MapViewProps {
   thoughts: Thought[];
   selectedLocation?: Location | null;
   userGpsCoords?: { lat: number; lng: number } | null;
+  highlightedThoughtId?: string | null;
   onSelectLocation?: (location: Location) => void;
   onSelectThought?: (thought: Thought) => void;
   onRequestGeoLocation?: () => void;
@@ -30,6 +31,7 @@ export const MapView: React.FC<MapViewProps> = ({
   thoughts,
   selectedLocation,
   userGpsCoords,
+  highlightedThoughtId = null,
   onSelectLocation,
   onSelectThought,
   onRequestGeoLocation,
@@ -76,7 +78,7 @@ export const MapView: React.FC<MapViewProps> = ({
     }
   }, []);
 
-  // Render Note Bubble Cards & Location Nodes on the Map
+  // Render Lollipop Icon Pins & Floating Note Cards on the Map (Always renders all notes, even outside radius!)
   useEffect(() => {
     const activeMap = mapRef.current;
     if (!activeMap) return;
@@ -84,35 +86,48 @@ export const MapView: React.FC<MapViewProps> = ({
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
-    // 1. Render every Thought/Note directly on the map with its note text bubble
-    thoughts.forEach((thought, index) => {
+    // 1. Render every Thought/Note directly on the map with its distinct lollipop icon & note bubble
+    thoughts.forEach((thought) => {
       const lat = thought.location?.coordinates?.lat;
       const lng = thought.location?.coordinates?.lng;
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
 
-      // Slight deterministic offset if multiple notes share identical city coordinates so bubbles don't stack 100% on top of each other
+      const isHighlighted = thought.id === highlightedThoughtId;
+
+      // Slight deterministic offset if multiple notes share identical coordinates
       const sameLocNotes = thoughts.filter(t => t.location.id === thought.location.id);
       const posInGroup = sameLocNotes.findIndex(t => t.id === thought.id);
-      const offsetLat = posInGroup > 0 ? Math.sin(posInGroup * 2.1) * 0.008 * posInGroup : 0;
-      const offsetLng = posInGroup > 0 ? Math.cos(posInGroup * 2.1) * 0.008 * posInGroup : 0;
+      const offsetLat = posInGroup > 0 ? Math.sin(posInGroup * 2.1) * 0.007 * posInGroup : 0;
+      const offsetLng = posInGroup > 0 ? Math.cos(posInGroup * 2.1) * 0.007 * posInGroup : 0;
 
       const safeAlias = escapeHtml(thought.authorAlias.displayName);
       const safeBody = escapeHtml(thought.body);
       const safeCity = escapeHtml(thought.location.cityMunicipality);
       const safeCategory = escapeHtml(thought.category);
-      const previewBody = safeBody.length > 58 ? safeBody.slice(0, 58) + '...' : safeBody;
+      const previewBody = safeBody.length > 55 ? safeBody.slice(0, 55) + '...' : safeBody;
 
       const el = document.createElement('div');
-      el.className = 'z-20 cursor-pointer group';
+      el.className = `${isHighlighted ? 'z-50' : 'z-20'} cursor-pointer group`;
 
       el.innerHTML = `
-        <div class="relative flex flex-col items-center transition-transform duration-200 hover:scale-105 hover:z-30">
+        <div class="relative flex flex-col items-center transition-all duration-300 hover:scale-105 ${
+          isHighlighted ? 'scale-110 animate-bounce' : ''
+        }">
           <!-- Floating Note Card Bubble on Map -->
-          <div class="max-w-[185px] sm:max-w-[215px] px-2.5 py-2 rounded-2xl bg-slate-900/95 backdrop-blur-md border ${
-            thought.isEnvironmentalAlert ? 'border-amber-400/70' : 'border-sky-400/60'
-          } shadow-xl text-left space-y-1">
+          <div class="max-w-[200px] sm:max-w-[230px] px-3 py-2 rounded-2xl bg-slate-950/95 backdrop-blur-md border ${
+            isHighlighted
+              ? 'border-teal-400 ring-2 ring-teal-400/50 shadow-2xl shadow-teal-500/40'
+              : thought.isEnvironmentalAlert
+              ? 'border-amber-400/80 shadow-lg shadow-amber-500/20'
+              : 'border-sky-400/70 shadow-lg shadow-sky-500/20'
+          } text-left space-y-1">
             <div class="flex items-center justify-between gap-1.5">
-              <span class="text-[10px] font-bold text-teal-400 truncate">${safeAlias}</span>
+              <span class="text-[10px] font-bold text-teal-300 truncate">${safeAlias}</span>
+              ${
+                isHighlighted
+                  ? '<span class="px-1.5 py-0.2 rounded-full bg-teal-500/25 text-teal-300 text-[8px] font-extrabold uppercase tracking-wide">Just Posted</span>'
+                  : ''
+              }
               <span class="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-300 text-[9px] font-semibold shrink-0">${safeCategory}</span>
             </div>
             <p class="text-[11px] text-white font-medium leading-snug break-words">"${previewBody}"</p>
@@ -121,16 +136,37 @@ export const MapView: React.FC<MapViewProps> = ({
               <span class="shrink-0">❤️ ${thought.reactions.heart} 💬 ${thought.commentCount}</span>
             </div>
           </div>
-          <!-- Pointer Triangle -->
-          <div class="w-2.5 h-2.5 bg-slate-900 border-r border-b ${
-            thought.isEnvironmentalAlert ? 'border-amber-400/70' : 'border-sky-400/60'
-          } rotate-45 -mt-1.5"></div>
-          <!-- Pin Dot -->
-          <div class="w-3 h-3 rounded-full bg-sky-400 ring-2 ring-slate-950 shadow-md mt-0.5"></div>
+
+          <!-- Lollipop Stem (Stick) -->
+          <div class="w-1 h-3.5 bg-gradient-to-b ${
+            isHighlighted
+              ? 'from-teal-300 to-teal-500 shadow-sm'
+              : thought.isEnvironmentalAlert
+              ? 'from-amber-400 to-amber-600'
+              : 'from-sky-400 to-teal-400'
+          }"></div>
+
+          <!-- Lollipop Pinhead / Dot on Coordinates -->
+          <div class="relative flex items-center justify-center -mt-0.5">
+            ${
+              isHighlighted
+                ? '<span class="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-teal-400 opacity-75"></span>'
+                : ''
+            }
+            <div class="w-4 h-4 rounded-full ${
+              isHighlighted
+                ? 'bg-teal-400 ring-4 ring-teal-500/60 shadow-xl'
+                : thought.isEnvironmentalAlert
+                ? 'bg-amber-400 ring-2 ring-slate-950 shadow-md'
+                : 'bg-sky-400 ring-2 ring-slate-950 shadow-md'
+            } flex items-center justify-center">
+              <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
+            </div>
+          </div>
         </div>
       `;
 
-      // Full Popup when clicked
+      // Full Details Popup when clicked
       const popupHtml = `
         <div style="font-family: 'Century Gothic', sans-serif; color: #f8fafc; background: #0f172a; padding: 10px; border-radius: 12px; max-width: 240px;">
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px;">
@@ -146,7 +182,7 @@ export const MapView: React.FC<MapViewProps> = ({
       `;
 
       const popup = new maplibregl.Popup({
-        offset: 28,
+        offset: 32,
         closeButton: false,
         className: 'tala-map-popup',
       }).setHTML(popupHtml);
@@ -192,7 +228,7 @@ export const MapView: React.FC<MapViewProps> = ({
 
       markersRef.current.push(marker);
     });
-  }, [locations, thoughts, selectedLocation, mapLoaded]);
+  }, [locations, thoughts, selectedLocation, highlightedThoughtId, mapLoaded]);
 
   // Render Live User Location Beacon when allowed
   useEffect(() => {
@@ -214,16 +250,39 @@ export const MapView: React.FC<MapViewProps> = ({
       .addTo(activeMap);
   }, [userGpsCoords, mapLoaded]);
 
+  // Automatically fly to highlighted thought when posted (even if far away or outside radius!)
+  useEffect(() => {
+    if (!mapRef.current || !highlightedThoughtId) return;
+    const targetThought = thoughts.find((t) => t.id === highlightedThoughtId);
+    if (targetThought?.location?.coordinates) {
+      mapRef.current.flyTo({
+        center: [targetThought.location.coordinates.lng, targetThought.location.coordinates.lat],
+        zoom: 13,
+        duration: 1400,
+        essential: true,
+      });
+    }
+  }, [highlightedThoughtId, thoughts, mapLoaded]);
+
   // Fly to selected location or user's exact GPS coordinates
   useEffect(() => {
-    if (mapRef.current && selectedLocation) {
+    if (mapRef.current && selectedLocation && !highlightedThoughtId) {
       mapRef.current.flyTo({
         center: [selectedLocation.coordinates.lng, selectedLocation.coordinates.lat],
         zoom: 12,
         duration: 1200,
       });
     }
-  }, [selectedLocation, mapLoaded]);
+  }, [selectedLocation, highlightedThoughtId, mapLoaded]);
+
+  const handleResetToPhilippinesView = () => {
+    if (!mapRef.current) return;
+    mapRef.current.flyTo({
+      center: PHILIPPINES_MAP_OPTIONS.center,
+      zoom: PHILIPPINES_MAP_OPTIONS.zoom,
+      duration: 1200,
+    });
+  };
 
   return (
     <div className="relative w-full h-[340px] sm:h-[420px] rounded-3xl overflow-hidden border border-slate-800/80 shadow-2xl bg-slate-950">
@@ -236,6 +295,15 @@ export const MapView: React.FC<MapViewProps> = ({
         <Shield className="w-3.5 h-3.5 text-teal-400" />
         <span>Live Notes Map ({thoughts.length} {thoughts.length === 1 ? 'Note' : 'Notes'})</span>
       </div>
+
+      {/* Top Right: Philippines Full View Reset Button */}
+      <button
+        onClick={handleResetToPhilippinesView}
+        title="View all notes across the Philippines"
+        className="absolute top-3 right-3 z-10 flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-950/85 hover:bg-slate-900 backdrop-blur-md border border-slate-800 text-[11px] font-semibold text-sky-300 transition-all shadow-md"
+      >
+        <span>🇵🇭 All PH Notes</span>
+      </button>
 
       {/* Bottom Right: Locate Me Control */}
       {onRequestGeoLocation && (
@@ -252,7 +320,7 @@ export const MapView: React.FC<MapViewProps> = ({
       {/* Bottom Left: Map Overlay Stats */}
       <div className="absolute bottom-3 left-3 z-10 hidden sm:flex items-center gap-2">
         <div className="px-3 py-1 rounded-xl bg-slate-950/90 backdrop-blur-md border border-slate-800 text-[10px] text-slate-300">
-          💬 Click any note bubble on the map to read or reply
+          🍭 Click any lollipop note on the map to read or reply
         </div>
       </div>
 

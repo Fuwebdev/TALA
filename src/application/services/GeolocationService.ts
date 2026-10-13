@@ -8,6 +8,7 @@ export interface GeolocationResult {
   exactLocation: Location;
   nearbyLocations: Location[];
   formattedAddress: string;
+  source?: 'gps' | 'network' | 'ip' | 'manual';
 }
 
 function generateUUID(): string {
@@ -201,7 +202,7 @@ export class GeolocationService {
       console.warn('[GeolocationService] Overpass 5km nearby lookup notice:', err);
     }
 
-    // If Overpass returned fewer than 3 nearby places, sample 4 cardinal points ~2.2km away via BigDataCloud/Nominatim
+    // If Overpass returned fewer than 3 nearby places, sample 4 cardinal points ~2.0km away via BigDataCloud/Nominatim
     if (nearbyMap.size < 3) {
       const offsets = [
         { dLat: 0.018, dLng: 0 },     // ~2.0 km North
@@ -234,55 +235,227 @@ export class GeolocationService {
   }
 
   /**
-   * Requests browser GPS permission and resolves with the user's exact reverse-geocoded location
-   * plus nearby addresses within a 5km radius.
+   * Helper to wrap navigator.geolocation.getCurrentPosition in a Promise with custom PositionOptions.
    */
-  public static async detectUserLocation(): Promise<GeolocationResult> {
+  private static requestBrowserPosition(options: PositionOptions): Promise<GeolocationPosition> {
     return new Promise((resolve, reject) => {
-      if (!('geolocation' in navigator)) {
+      if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
         reject(new Error('Geolocation is not supported by your browser.'));
         return;
       }
-
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const { latitude, longitude } = position.coords;
-          const exactLocation = await this.reverseGeocode(latitude, longitude);
-          const nearbyLocations = await this.getNearbyLocationsWithin5km(
-            latitude,
-            longitude,
-            exactLocation
-          );
-          const formattedAddress = `${exactLocation.cityMunicipality}, ${exactLocation.province}`;
-
-          resolve({
-            coords: { lat: latitude, lng: longitude },
-            exactLocation,
-            nearbyLocations,
-            formattedAddress,
-          });
-        },
-        (error) => {
-          switch (error.code) {
-            case error.PERMISSION_DENIED:
-              reject(new Error('Location permission was denied. Please allow location access in your browser.'));
-              break;
-            case error.POSITION_UNAVAILABLE:
-              reject(new Error('Location information is currently unavailable.'));
-              break;
-            case error.TIMEOUT:
-              reject(new Error('Location request timed out.'));
-              break;
-            default:
-              reject(new Error('Failed to detect your exact location.'));
-          }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 12000,
-          maximumAge: 0,
-        }
-      );
+      navigator.geolocation.getCurrentPosition(resolve, reject, options);
     });
   }
+
+  /**
+   * Fallback IP-based geolocation when a user's device lacks GPS hardware, timed out,
+   * or when they click "Use Network / IP Location" because browser permission is blocked.
+   */
+  public static async detectApproxLocationByIp(): Promise<GeolocationResult> {
+    // 1. Try BigDataCloud client reverse geocode (works without coordinates using client IP)
+    try {
+      const bdcRes = await fetch(
+        'https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=en'
+      );
+      if (bdcRes.ok) {
+        const bdc = await bdcRes.json();
+        if (typeof bdc.latitude === 'number' && typeof bdc.longitude === 'number') {
+          const lat = bdc.latitude;
+          const lng = bdc.longitude;
+          const exactLocation = await this.reverseGeocode(lat, lng);
+          const nearbyLocations = await this.getNearbyLocationsWithin5km(lat, lng, exactLocation);
+          return {
+            coords: { lat, lng },
+            exactLocation,
+            nearbyLocations,
+            formattedAddress: `${exactLocation.cityMunicipality}, ${exactLocation.province}`,
+            source: 'ip',
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[GeolocationService] BigDataCloud IP fallback notice:', err);
+    }
+
+    // 2. Try GeoJS IP geolocation fallback
+    try {
+      const geoRes = await fetch('https://get.geojs.io/v1/ip/geo.json');
+      if (geoRes.ok) {
+        const geo = await geoRes.json();
+        const lat = parseFloat(geo.latitude);
+        const lng = parseFloat(geo.longitude);
+        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+          const exactLocation = await this.reverseGeocode(lat, lng);
+          const nearbyLocations = await this.getNearbyLocationsWithin5km(lat, lng, exactLocation);
+          return {
+            coords: { lat, lng },
+            exactLocation,
+            nearbyLocations,
+            formattedAddress: `${exactLocation.cityMunicipality}, ${exactLocation.province}`,
+            source: 'ip',
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[GeolocationService] GeoJS IP fallback notice:', err);
+    }
+
+    throw new Error('Could not detect network location. Please select your city or barangay below.');
+  }
+
+  /**
+   * Searches Philippine barangays, cities, municipalities, or streets by text query
+   * so users who cannot enable browser GPS can still find and lock their exact area.
+   */
+  public static async searchPhilippinePlaces(query: string): Promise<Location[]> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return [];
+
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          trimmed
+        )}&countrycodes=ph&addressdetails=1&limit=8`,
+        {
+          headers: {
+            'Accept-Language': 'en',
+          },
+        }
+      );
+
+      if (res.ok) {
+        const items: any[] = await res.json();
+        const results: Location[] = [];
+        const seen = new Set<string>();
+
+        for (const item of items) {
+          const lat = parseFloat(item.lat);
+          const lng = parseFloat(item.lon);
+          if (Number.isNaN(lat) || Number.isNaN(lng)) continue;
+
+          const addr = item.address || {};
+          const subLocality =
+            addr.suburb ||
+            addr.village ||
+            addr.neighbourhood ||
+            addr.quarter ||
+            addr.hamlet ||
+            addr.road ||
+            '';
+          const cityOrTown =
+            addr.city ||
+            addr.town ||
+            addr.municipality ||
+            addr.county ||
+            item.name ||
+            trimmed;
+          const province =
+            addr.state ||
+            addr.province ||
+            addr.region ||
+            cityOrTown;
+          const region =
+            addr.region ||
+            addr.state_district ||
+            'Philippines';
+
+          const exactPlaceName =
+            subLocality && subLocality.toLowerCase() !== cityOrTown.toLowerCase()
+              ? `${subLocality}, ${cityOrTown}`
+              : cityOrTown;
+
+          const dedupeKey = `${exactPlaceName.toLowerCase()}|${province.toLowerCase()}`;
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+
+          results.push({
+            id: generateUUID(),
+            region,
+            province,
+            cityMunicipality: exactPlaceName,
+            coordinates: { lat, lng },
+          });
+        }
+
+        return results;
+      }
+    } catch (err) {
+      console.warn('[GeolocationService] Nominatim search notice:', err);
+    }
+
+    return [];
+  }
+
+  /**
+   * Requests browser GPS permission with a 2-stage fallback:
+   * 1. High-accuracy GPS (7s timeout)
+   * 2. Standard/network accuracy (8s timeout, cached up to 5 mins) if high-accuracy times out or is unavailable.
+   */
+  public static async detectUserLocation(): Promise<GeolocationResult> {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      throw new Error('Geolocation is not supported by your browser. Please search or pick your location manually below.');
+    }
+
+    let position: GeolocationPosition | null = null;
+    let source: 'gps' | 'network' = 'gps';
+
+    try {
+      // Stage 1: Try High-Accuracy GPS first
+      position = await this.requestBrowserPosition({
+        enableHighAccuracy: true,
+        timeout: 7000,
+        maximumAge: 60000,
+      });
+    } catch (firstError: any) {
+      // If permission was explicitly denied (code 1), don't retry getCurrentPosition; surface a helpful message
+      if (firstError && firstError.code === 1) {
+        throw new Error(
+          'Browser location access is blocked. Tap the lock/settings icon in your browser address bar to allow Location, or pick your city/barangay below.'
+        );
+      }
+
+      // Stage 2: Fallback to standard/Wi-Fi/network location (enableHighAccuracy: false)
+      try {
+        source = 'network';
+        position = await this.requestBrowserPosition({
+          enableHighAccuracy: false,
+          timeout: 8000,
+          maximumAge: 300000,
+        });
+      } catch (secondError: any) {
+        if (secondError && secondError.code === 1) {
+          throw new Error(
+            'Browser location access is blocked. Tap the lock/settings icon in your browser address bar to allow Location, or pick your city/barangay below.'
+          );
+        }
+        // Stage 3: Automatic IP/Network fallback when GPS hardware/service is unavailable or timed out even after user clicked Allow!
+        try {
+          return await this.detectApproxLocationByIp();
+        } catch {
+          if (secondError?.code === 3) {
+            throw new Error('Location detection timed out. Please try "Detect via Network" or search your city/barangay below.');
+          }
+          throw new Error('Could not detect GPS signal on this device. Please search or select your city/barangay below.');
+        }
+      }
+    }
+
+    const { latitude, longitude } = position.coords;
+    const exactLocation = await this.reverseGeocode(latitude, longitude);
+    const nearbyLocations = await this.getNearbyLocationsWithin5km(
+      latitude,
+      longitude,
+      exactLocation
+    );
+    const formattedAddress = `${exactLocation.cityMunicipality}, ${exactLocation.province}`;
+
+    return {
+      coords: { lat: latitude, lng: longitude },
+      exactLocation,
+      nearbyLocations,
+      formattedAddress,
+      source,
+    };
+  }
 }
+

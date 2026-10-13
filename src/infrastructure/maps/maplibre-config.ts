@@ -10,8 +10,8 @@ export const PHILIPPINES_MAP_OPTIONS = {
   minZoom: 5,
   maxZoom: 15,
   maxBounds: [
-    PHILIPPINES_BOUNDS.southWest,
-    PHILIPPINES_BOUNDS.northEast,
+    [114.0, 3.5],
+    [130.0, 23.5],
   ] as [[number, number], [number, number]],
   attributionControl: false as const,
 };

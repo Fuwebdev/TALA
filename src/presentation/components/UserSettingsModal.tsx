@@ -11,10 +11,14 @@ import {
   CheckCircle2,
   Navigation,
   Loader2,
+  Search,
+  Globe,
 } from 'lucide-react';
 import { Alias, createAnonymousAlias, validateUsername } from '../../domain/entities/Alias';
 import { Thought } from '../../domain/entities/Thought';
 import { Location, formatLocationName } from '../../domain/entities/Location';
+import { GeolocationService } from '../../application/services/GeolocationService';
+import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -24,6 +28,10 @@ interface UserSettingsModalProps {
   userNotes: Thought[];
   onSaveUsername: (updatedAlias: Alias) => void;
   onRequestLocation: () => Promise<Location | null>;
+  onRequestIpLocation?: () => Promise<Location | null>;
+  onSelectManualLocation?: (location: Location) => Promise<Location>;
+  availableLocations?: Location[];
+  lastLocationError?: string | null;
   isLocating?: boolean;
   detectedLocation?: Location | null;
   hasGpsCoords?: boolean;
@@ -38,6 +46,10 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   userNotes,
   onSaveUsername,
   onRequestLocation,
+  onRequestIpLocation,
+  onSelectManualLocation,
+  availableLocations = [],
+  lastLocationError = null,
   isLocating = false,
   detectedLocation = null,
   hasGpsCoords = false,
@@ -50,6 +62,13 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  // Manual / Search fallback state for users whose browser blocks or cannot detect GPS
+  const [showManualPicker, setShowManualPicker] = useState(false);
+  const [placeSearchQuery, setPlaceSearchQuery] = useState('');
+  const [placeSearchResults, setPlaceSearchResults] = useState<Location[]>([]);
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [isSelectingManual, setIsSelectingManual] = useState(false);
+
   useEffect(() => {
     setUsernameInput(currentAlias.displayName);
   }, [currentAlias]);
@@ -60,7 +79,49 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   }, [isOpen, isFirstTimeOnboarding]);
 
+  // Debounced Philippine barangay/city search when user types in manual fallback
+  useEffect(() => {
+    const q = placeSearchQuery.trim();
+    if (q.length < 2) {
+      setPlaceSearchResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingPlaces(true);
+      try {
+        const remote = await GeolocationService.searchPhilippinePlaces(q);
+        setPlaceSearchResults(remote);
+      } catch {
+        setPlaceSearchResults([]);
+      } finally {
+        setIsSearchingPlaces(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [placeSearchQuery]);
+
   if (!isOpen) return null;
+
+  const presetCities = availableLocations.length > 1 ? availableLocations : PHILIPPINE_LOCATIONS;
+  const filteredPresetCities = placeSearchQuery.trim()
+    ? presetCities.filter(
+        (l) =>
+          l.cityMunicipality.toLowerCase().includes(placeSearchQuery.toLowerCase()) ||
+          l.province.toLowerCase().includes(placeSearchQuery.toLowerCase())
+      )
+    : presetCities;
+
+  const combinedManualOptions = [
+    ...placeSearchResults,
+    ...filteredPresetCities.filter(
+      (preset) =>
+        !placeSearchResults.some(
+          (r) => r.cityMunicipality.toLowerCase() === preset.cityMunicipality.toLowerCase()
+        )
+    ),
+  ].slice(0, 12);
 
   const handleRandomize = () => {
     const generated = createAnonymousAlias();
@@ -74,16 +135,63 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
       const loc = await onRequestLocation();
       if (loc) {
         if (isFirstTimeOnboarding) {
-          // Brief pause so user sees their exact location confirmed before closing
           setTimeout(() => {
             onClose();
           }, 1100);
         }
       } else {
-        setLocationError('Could not detect location. Please click "Allow" on your browser location prompt.');
+        setShowManualPicker(true);
+        setLocationError(
+          lastLocationError ||
+            'Could not detect browser GPS. You can click "Use Network Location" or pick your city/barangay below.'
+        );
       }
     } catch (err: any) {
-      setLocationError(err?.message || 'Unable to detect location. Please allow browser location access.');
+      setShowManualPicker(true);
+      setLocationError(
+        err?.message ||
+          'Unable to access browser GPS. You can use Network Location or select your city/barangay below.'
+      );
+    }
+  };
+
+  const handleTriggerIpLocation = async () => {
+    if (!onRequestIpLocation) return;
+    setLocationError(null);
+    try {
+      const loc = await onRequestIpLocation();
+      if (loc) {
+        if (isFirstTimeOnboarding) {
+          setTimeout(() => {
+            onClose();
+          }, 1100);
+        }
+      } else {
+        setShowManualPicker(true);
+        setLocationError('Could not detect network location. Please select your city or barangay from the list below.');
+      }
+    } catch (err: any) {
+      setShowManualPicker(true);
+      setLocationError(err?.message || 'Please select your city or barangay from the list below.');
+    }
+  };
+
+  const handlePickManualLocation = async (loc: Location) => {
+    if (!onSelectManualLocation) return;
+    setIsSelectingManual(true);
+    setLocationError(null);
+    try {
+      await onSelectManualLocation(loc);
+      setShowManualPicker(false);
+      if (isFirstTimeOnboarding) {
+        setTimeout(() => {
+          onClose();
+        }, 900);
+      }
+    } catch (err: any) {
+      setLocationError(err?.message || 'Failed to set location.');
+    } finally {
+      setIsSelectingManual(false);
     }
   };
 
@@ -117,6 +225,63 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     }
   };
 
+  const renderManualLocationFallback = () => (
+    <div className="pt-2 border-t border-slate-800/80 text-left space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+          <MapPin className="w-3.5 h-3.5 text-teal-400" />
+          Can't allow browser GPS? Pick or search your area:
+        </span>
+        {onRequestIpLocation && (
+          <button
+            type="button"
+            onClick={handleTriggerIpLocation}
+            disabled={isLocating || isSelectingManual}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-300 text-[10px] font-semibold transition-all disabled:opacity-50 shrink-0"
+          >
+            <Globe className="w-3 h-3" />
+            <span>Detect via Network</span>
+          </button>
+        )}
+      </div>
+
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+        <input
+          type="text"
+          value={placeSearchQuery}
+          onChange={(e) => setPlaceSearchQuery(e.target.value)}
+          placeholder="Search any PH barangay, city, or municipality..."
+          className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500/60"
+        />
+      </div>
+
+      {isSearchingPlaces && (
+        <p className="text-[10px] text-sky-400 animate-pulse">Searching Philippine locations...</p>
+      )}
+
+      <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+        {combinedManualOptions.map((loc) => (
+          <button
+            key={`${loc.id}-${loc.cityMunicipality}`}
+            type="button"
+            disabled={isSelectingManual}
+            onClick={() => handlePickManualLocation(loc)}
+            className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-sky-500/15 border border-slate-800/80 hover:border-sky-500/30 text-left text-xs transition-all"
+          >
+            <div>
+              <span className="font-semibold text-slate-200 block">{loc.cityMunicipality}</span>
+              <span className="text-[10px] text-slate-400">
+                {loc.province} • {loc.region}
+              </span>
+            </div>
+            <span className="text-[10px] font-semibold text-sky-400 shrink-0">Select →</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn overflow-y-auto">
       <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
@@ -136,14 +301,14 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                 {isFirstTimeOnboarding
                   ? onboardingStep === 'username'
                     ? 'Step 1 of 2: Choose Your Username'
-                    : 'Step 2 of 2: Allow Your Location'
+                    : 'Step 2 of 2: Set Your Location'
                   : 'User Settings & My Notes'}
               </h2>
               <p className="text-[11px] text-slate-400">
                 {isFirstTimeOnboarding
                   ? onboardingStep === 'username'
                     ? 'Set your anonymous username to start leaving notes'
-                    : 'Allow location access so your notes appear exactly where you are'
+                    : 'Allow GPS or pick your city/barangay so notes appear where you are'
                   : 'Cached locally on your device • No personal info required'}
               </p>
             </div>
@@ -206,17 +371,17 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           </div>
         )}
 
-        {/* FIRST-TIME ONBOARDING STEP 2: ALLOW LOCATION */}
+        {/* FIRST-TIME ONBOARDING STEP 2: ALLOW OR PICK LOCATION */}
         {isFirstTimeOnboarding && onboardingStep === 'location' && (
-          <div className="space-y-4">
-            <div className="p-5 rounded-2xl bg-slate-950/90 border border-slate-800 text-center space-y-3">
-              <div className="w-12 h-12 rounded-2xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center mx-auto text-sky-400">
-                {isLocating ? (
-                  <Loader2 className="w-6 h-6 animate-spin" />
+          <div className="space-y-4 overflow-y-auto pr-1">
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 text-center space-y-3">
+              <div className="w-11 h-11 rounded-2xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center mx-auto text-sky-400">
+                {isLocating || isSelectingManual ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 ) : hasGpsCoords ? (
-                  <CheckCircle2 className="w-6 h-6 text-teal-400" />
+                  <CheckCircle2 className="w-5 h-5 text-teal-400" />
                 ) : (
-                  <Navigation className="w-6 h-6" />
+                  <Navigation className="w-5 h-5" />
                 )}
               </div>
 
@@ -225,51 +390,60 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                   Hi <span className="text-teal-400">{currentAlias.displayName}</span>! Where are you right now?
                 </p>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Tala pins your notes on the live map based on your exact location. Please click{' '}
-                  <strong className="text-slate-200">"Allow"</strong> on your browser's location prompt.
+                  Click <strong className="text-slate-200">"Allow"</strong> on your browser prompt, or if your browser blocks location prompts, search or select your city/barangay below.
                 </p>
               </div>
 
               {hasGpsCoords && detectedLocation && (
-                <div className="flex items-center justify-center gap-2 p-3 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300 text-xs font-semibold">
+                <div className="flex items-center justify-center gap-2 p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300 text-xs font-semibold">
                   <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
                   <span>
-                    Exact Location Locked: {detectedLocation.cityMunicipality}, {detectedLocation.province}
+                    Location Locked: {detectedLocation.cityMunicipality}, {detectedLocation.province}
                   </span>
                 </div>
               )}
 
-              {locationError && (
-                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
-                  {locationError}
+              {(locationError || lastLocationError) && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] text-left leading-relaxed">
+                  {locationError || lastLocationError}
                 </div>
               )}
 
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2">
+              <div className="pt-1 flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
                   onClick={handleTriggerLocation}
-                  disabled={isLocating}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white text-xs font-semibold shadow-md shadow-sky-500/20 disabled:opacity-50 transition-all"
+                  disabled={isLocating || isSelectingManual}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white text-xs font-semibold shadow-md shadow-sky-500/20 disabled:opacity-50 transition-all"
                 >
                   <Navigation className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
                   <span>
                     {isLocating
-                      ? 'Detecting Your Exact Location...'
+                      ? 'Detecting Location...'
                       : hasGpsCoords
-                      ? 'Refresh My Exact Location'
-                      : 'Allow My Location'}
+                      ? 'Refresh GPS'
+                      : 'Allow Browser GPS'}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowManualPicker((prev) => !prev)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/20 text-xs font-semibold transition-colors"
+                >
+                  {showManualPicker ? 'Hide Manual Search' : 'Search / Pick Manually'}
                 </button>
 
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+                  className="px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
                 >
                   {hasGpsCoords ? 'Continue to Map' : 'Skip for Now'}
                 </button>
               </div>
+
+              {(showManualPicker || Boolean(locationError || lastLocationError)) && renderManualLocationFallback()}
             </div>
           </div>
         )}
@@ -331,27 +505,46 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
             {/* In regular Settings mode, also show Location permission status & button */}
             {!isFirstTimeOnboarding && (
-              <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Your Exact Location</span>
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {hasGpsCoords && detectedLocation
-                      ? `${detectedLocation.cityMunicipality}, ${detectedLocation.province}`
-                      : 'Location not yet locked via GPS'}
-                  </p>
+              <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <p className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Your Exact Location</span>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {hasGpsCoords && detectedLocation
+                        ? `${detectedLocation.cityMunicipality}, ${detectedLocation.province}`
+                        : 'Location not yet locked via GPS'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowManualPicker((prev) => !prev)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/20 text-xs font-semibold transition-colors"
+                    >
+                      {showManualPicker ? 'Hide Search' : 'Pick City/Barangay'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTriggerLocation}
+                      disabled={isLocating || isSelectingManual}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold transition-all shrink-0"
+                    >
+                      <Navigation className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
+                      <span>{isLocating ? 'Locating...' : hasGpsCoords ? 'Update GPS' : 'Allow GPS'}</span>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleTriggerLocation}
-                  disabled={isLocating}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold transition-all shrink-0"
-                >
-                  <Navigation className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
-                  <span>{isLocating ? 'Locating...' : hasGpsCoords ? 'Update GPS' : 'Allow Location'}</span>
-                </button>
+
+                {(locationError || lastLocationError) && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed">
+                    {locationError || lastLocationError}
+                  </div>
+                )}
+
+                {showManualPicker && renderManualLocationFallback()}
               </div>
             )}
 
