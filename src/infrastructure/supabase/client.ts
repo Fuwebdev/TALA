@@ -1,7 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder-tala.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const DEFAULT_SUPABASE_URL = 'https://ldlprnwlmdajfwcrdolw.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxkbHBybndsbWRhamZ3Y3Jkb2x3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNDM2NDMsImV4cCI6MjEwNjkxOTY0M30.l-omz1-JFp3eaeXZ8xCEbWHdbWduZYB5LsxeOFj8dhE';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 
 export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -13,12 +17,10 @@ export async function ensureAnonymousAuthSession(): Promise<string | null> {
     // Sign in anonymously if no active session
     const { data, error } = await supabase.auth.signInAnonymously();
     if (error) {
-      console.warn('Supabase anonymous auth warning:', error.message);
       return null;
     }
     return data.user?.id || null;
-  } catch (err) {
-    console.warn('Supabase connection uninitialized. Falling back to local mode.', err);
+  } catch {
     return null;
   }
 }

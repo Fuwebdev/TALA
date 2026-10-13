@@ -1,0 +1,28 @@
+{
+  "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/((?!assets/|app-icon/|icon-192\\.png|icon-512\\.png|manifest\\.json|sw\\.js|favicon\\.svg).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
