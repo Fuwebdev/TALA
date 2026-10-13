@@ -1,4 +1,5 @@
 import { Location } from '../../domain/entities/Location';
+import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
 
 export interface GeolocationResult {
   coords: {
@@ -50,17 +51,9 @@ export class GeolocationService {
    * Barangay / Street / City / Province / Region using OpenStreetMap Nominatim & BigDataCloud.
    */
   public static async reverseGeocode(lat: number, lng: number): Promise<Location> {
+    // 1. Try our serverless proxy (/api/geocode) which attaches a custom User-Agent and handles CORS
     try {
-      // Primary: OpenStreetMap Nominatim for detailed street/barangay/municipality resolution
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-        {
-          headers: {
-            'Accept-Language': 'en',
-          },
-        }
-      );
-
+      const res = await fetch(`/api/geocode?lat=${lat}&lon=${lng}&zoom=18`);
       if (res.ok) {
         const data = await res.json();
         const addr = data.address || {};
@@ -93,7 +86,6 @@ export class GeolocationService {
           addr.island ||
           'Philippines';
 
-        // Combine Barangay/Suburb + City/Municipality for exact location clarity
         const exactPlaceName =
           subLocality && subLocality.toLowerCase() !== cityOrTown.toLowerCase()
             ? `${subLocality}, ${cityOrTown}`
@@ -107,12 +99,12 @@ export class GeolocationService {
           coordinates: { lat, lng },
         };
       }
-    } catch (err) {
-      console.warn('[GeolocationService] Nominatim reverse geocode fallback:', err);
+    } catch {
+      // Proceed to secondary CORS-friendly client fallback
     }
 
+    // 2. Secondary fallback: BigDataCloud free client-side reverse geocoder (Full CORS support)
     try {
-      // Secondary fallback: BigDataCloud free client-side reverse geocoder
       const bdcRes = await fetch(
         `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
       );
@@ -130,7 +122,26 @@ export class GeolocationService {
         };
       }
     } catch (err) {
-      console.warn('[GeolocationService] BigDataCloud fallback failed:', err);
+      console.warn('[GeolocationService] BigDataCloud fallback notice:', err);
+    }
+
+    // 3. Fallback: Find closest known Philippine city from database
+    let closestCity = PHILIPPINE_LOCATIONS[0];
+    let minDistance = Infinity;
+    for (const loc of PHILIPPINE_LOCATIONS) {
+      const d = this.calculateDistanceKm(lat, lng, loc.coordinates.lat, loc.coordinates.lng);
+      if (d < minDistance) {
+        minDistance = d;
+        closestCity = loc;
+      }
+    }
+
+    if (minDistance <= 25) {
+      return {
+        ...closestCity,
+        id: generateUUID(),
+        coordinates: { lat, lng },
+      };
     }
 
     // Coordinate fallback if offline
@@ -142,6 +153,7 @@ export class GeolocationService {
       coordinates: { lat, lng },
     };
   }
+
 
   /**
    * Fetches real nearby barangays, neighborhoods, streets, and localities within a 5km radius
@@ -202,30 +214,19 @@ export class GeolocationService {
       console.warn('[GeolocationService] Overpass 5km nearby lookup notice:', err);
     }
 
-    // If Overpass returned fewer than 3 nearby places, sample 4 cardinal points ~2.0km away via BigDataCloud/Nominatim
+    // If Overpass returned fewer than 3 nearby places, supplement with closest Philippine locations
     if (nearbyMap.size < 3) {
-      const offsets = [
-        { dLat: 0.018, dLng: 0 },     // ~2.0 km North
-        { dLat: -0.018, dLng: 0 },    // ~2.0 km South
-        { dLat: 0, dLng: 0.018 },     // ~2.0 km East
-        { dLat: 0, dLng: -0.018 },    // ~2.0 km West
-      ];
-
-      await Promise.allSettled(
-        offsets.map(async (offset) => {
-          const sampleLat = lat + offset.dLat;
-          const sampleLng = lng + offset.dLng;
-          const distKm = this.calculateDistanceKm(lat, lng, sampleLat, sampleLng);
-          if (distKm > 5.0) return;
-
-          const loc = await this.reverseGeocode(sampleLat, sampleLng);
+      for (const loc of PHILIPPINE_LOCATIONS) {
+        const distKm = this.calculateDistanceKm(lat, lng, loc.coordinates.lat, loc.coordinates.lng);
+        if (distKm <= 20.0) {
           const key = loc.cityMunicipality.toLowerCase().trim();
           if (key !== currentKey && !nearbyMap.has(key)) {
             nearbyMap.set(key, { distanceKm: distKm, loc });
           }
-        })
-      );
+        }
+      }
     }
+
 
     // Sort by closest distance first (all <= 5km)
     return Array.from(nearbyMap.values())

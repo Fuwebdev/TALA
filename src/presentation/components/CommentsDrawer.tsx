@@ -4,6 +4,9 @@ import { Thought } from '../../domain/entities/Thought';
 import { Comment } from '../../domain/entities/Comment';
 import { Alias } from '../../domain/entities/Alias';
 import { ModerationService } from '../../application/services/ModerationService';
+import { DeviceBanService } from '../../application/services/DeviceBanService';
+import { ConfirmModal } from './ConfirmModal';
+import { useToast } from './Toast';
 
 interface CommentsDrawerProps {
   isOpen: boolean;
@@ -28,9 +31,11 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
   onReportComment,
   onBlockUser,
 }) => {
+  const { showToast } = useToast();
   const [commentBody, setCommentBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [moderationError, setModerationError] = useState<string | null>(null);
+  const [blockTarget, setBlockTarget] = useState<{ id: string; name: string } | null>(null);
 
   if (!isOpen || !thought) return null;
 
@@ -49,6 +54,16 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
           modResult.message ||
             'Your comment contains inappropriate language. Please remove offensive words and try again.'
         );
+        // Record violation strike against device
+        try {
+          const violation = await DeviceBanService.recordViolation(
+            modResult.reason || 'Profanity or abusive language in comment',
+            commentBody.trim(),
+            currentAlias.id,
+            currentAlias.displayName
+          );
+          showToast(violation.warningMessage, violation.isBanned ? 'error' : 'warning');
+        } catch {}
         setSubmitting(false);
         return;
       }
@@ -73,48 +88,43 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
       <div className="w-full max-w-lg bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl">
-        
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
           <div className="flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-sky-400" />
-            <h3 className="text-sm font-bold text-white">
-              Comments ({comments.length})
-            </h3>
+            <MessageSquare className="w-4 h-4 text-sky-400" />
+            <h3 className="font-bold text-sm text-slate-100">Anonymous Replies</h3>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
+              {comments.length}
+            </span>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Thought Preview Banner */}
-        <div className="p-4 bg-slate-950/60 border-b border-slate-800/80 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-400 mb-1">
-            <span className="font-bold text-slate-200">{thought.authorAlias.displayName}</span>
-            <span>in</span>
-            <span className="text-sky-400 font-medium">{thought.location.cityMunicipality}</span>
+        {/* Original Note Context */}
+        <div className="p-4 bg-slate-950/40 border-b border-slate-800/80">
+          <div className="flex items-center gap-2 text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-sky-300">{thought.authorAlias.displayName}</span>
+            <span>•</span>
+            <span className="text-[11px]">{thought.location.cityMunicipality || thought.location.province}</span>
           </div>
-          <p className="text-slate-300 line-clamp-2 leading-relaxed">{thought.body}</p>
+          <p className="text-xs text-slate-200 line-clamp-3 leading-relaxed">{thought.body}</p>
         </div>
 
-        {/* Comments List */}
+        {/* Comments Feed */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {loading ? (
-            <div className="space-y-3">
-              {[1, 2].map(n => (
-                <div key={n} className="p-3 bg-slate-950/40 rounded-xl animate-pulse space-y-2">
-                  <div className="h-3 w-1/4 bg-slate-800 rounded"></div>
-                  <div className="h-4 w-3/4 bg-slate-800 rounded"></div>
-                </div>
-              ))}
+            <div className="flex items-center justify-center h-32 text-xs text-slate-500">
+              Loading replies...
             </div>
           ) : comments.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-500 space-y-2">
-              <MessageSquare className="w-8 h-8 mx-auto text-slate-700" />
-              <p>No comments yet. Join the conversation anonymously!</p>
+            <div className="flex flex-col items-center justify-center h-48 text-center text-slate-500 space-y-2">
+              <ShieldCheck className="w-8 h-8 text-slate-600" />
+              <p className="text-xs">No replies yet. Be the first to share your thoughts politely!</p>
             </div>
           ) : (
             comments.map(c => (
@@ -127,11 +137,7 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
                   <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     {onBlockUser && c.authorAlias.displayName.toLowerCase() !== currentAlias.displayName.toLowerCase() && (
                       <button
-                        onClick={() => {
-                          if (window.confirm(`Block ${c.authorAlias.displayName}? You will no longer see notes or comments from this author.`)) {
-                            onBlockUser(c.authorAlias.id, c.authorAlias.displayName);
-                          }
-                        }}
+                        onClick={() => setBlockTarget({ id: c.authorAlias.id, name: c.authorAlias.displayName })}
                         className="text-slate-500 hover:text-amber-400 transition-colors p-1"
                         title={`Block ${c.authorAlias.displayName}`}
                       >
@@ -158,15 +164,16 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
           {moderationError && (
             <div className="flex items-start gap-2 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs animate-shake">
               <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-              <span className="leading-tight">{moderationError}</span>
+              <div className="flex-1">
+                <p className="font-semibold text-[11px]">Content Flagged</p>
+                <p className="text-[11px] leading-tight text-rose-300/90">{moderationError}</p>
+              </div>
             </div>
           )}
 
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span>Commenting as <strong className="text-teal-400">{currentAlias.displayName}</strong></span>
-            <span className="flex items-center gap-1 text-[10px] text-teal-400">
-              <ShieldCheck className="w-3 h-3" /> Anonymous
-            </span>
+          <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <span>Replying as <strong className="text-slate-300">{currentAlias.displayName}</strong></span>
+            <span>{commentBody.length}/300</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -195,6 +202,22 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
           </div>
         </form>
 
+        {/* In-App Block User Confirmation Modal (Zero Script Alert) */}
+        <ConfirmModal
+          isOpen={!!blockTarget}
+          onClose={() => setBlockTarget(null)}
+          title={`Block ${blockTarget?.name}?`}
+          message="You will no longer see notes or comments from this author."
+          confirmLabel="Block Author"
+          isDestructive={true}
+          onConfirm={() => {
+            if (blockTarget && onBlockUser) {
+              onBlockUser(blockTarget.id, blockTarget.name);
+              showToast(`Blocked ${blockTarget.name}`, 'info');
+            }
+            setBlockTarget(null);
+          }}
+        />
       </div>
     </div>
   );

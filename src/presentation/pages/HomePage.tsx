@@ -10,6 +10,8 @@ import { CommentsDrawer } from '../components/CommentsDrawer';
 import { ReportModal } from '../components/ReportModal';
 import { UserSettingsModal } from '../components/UserSettingsModal';
 import { PwaInstallGateModal } from '../components/PwaInstallGateModal';
+import { DeviceLockScreen } from '../components/DeviceLockScreen';
+import { DeviceBanService, DeviceBanStatus } from '../../application/services/DeviceBanService';
 
 import { createAnonymousAlias, getCachedAlias, saveCachedAlias, Alias } from '../../domain/entities/Alias';
 import { Location } from '../../domain/entities/Location';
@@ -173,9 +175,26 @@ export const HomePage: React.FC = () => {
     }
   });
 
-  // Initialize Session, Service Worker, and Domain Verification Tests
+  // Device Ban & Safety Lock State
+  const [deviceBanStatus, setDeviceBanStatus] = useState<DeviceBanStatus | null>(null);
+
+  const checkDeviceBan = async () => {
+    try {
+      const status = await DeviceBanService.checkDeviceStatus();
+      if (status.isBanned) {
+        setDeviceBanStatus(status);
+      } else {
+        setDeviceBanStatus(null);
+      }
+    } catch (e) {
+      console.warn('Failed to check device ban status:', e);
+    }
+  };
+
+  // Initialize Session, Service Worker, Device Ban Check, and Domain Verification Tests
   useEffect(() => {
     ensureAnonymousAuthSession();
+    checkDeviceBan();
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(err => {
@@ -638,6 +657,16 @@ export const HomePage: React.FC = () => {
     await loadFeed();
   };
 
+
+  if (deviceBanStatus?.isBanned) {
+    return (
+      <DeviceLockScreen
+        banStatus={deviceBanStatus}
+        onRefreshCheck={checkDeviceBan}
+        aliasName={currentAlias.displayName}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">

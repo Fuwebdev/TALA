@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { X, Edit3, Trash2, AlertTriangle, ShieldCheck, CheckCircle2, Loader2 } from 'lucide-react';
 import { Thought, Category } from '../../domain/entities/Thought';
 import { ModerationService } from '../../application/services/ModerationService';
+import { DeviceBanService } from '../../application/services/DeviceBanService';
+import { useToast } from './Toast';
 
 interface EditThoughtModalProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ export const EditThoughtModal: React.FC<EditThoughtModalProps> = ({
   onUpdate,
   onDelete,
 }) => {
+  const { showToast } = useToast();
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<Category>('Thoughts');
   const [isEnvironmentalAlert, setIsEnvironmentalAlert] = useState(false);
@@ -59,6 +62,20 @@ export const EditThoughtModal: React.FC<EditThoughtModalProps> = ({
           modResult.message ||
             'Your message contains inappropriate language. Please remove offensive words and try again.'
         );
+        try {
+          const violation = await DeviceBanService.recordViolation(
+            modResult.reason || 'Profanity or abusive content in note edit',
+            body.trim(),
+            thought.authorAlias.id,
+            thought.authorAlias.displayName
+          );
+          showToast(violation.warningMessage, violation.isBanned ? 'error' : 'warning');
+          if (violation.isBanned) {
+            setTimeout(() => {
+              window.location.reload();
+            }, 1200);
+          }
+        } catch {}
         setSubmitting(false);
         return;
       }

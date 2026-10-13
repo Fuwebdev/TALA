@@ -22,6 +22,7 @@ import { Thought } from '../../domain/entities/Thought';
 import { Location, formatLocationName } from '../../domain/entities/Location';
 import { GeolocationService } from '../../application/services/GeolocationService';
 import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
+import { ConfirmModal } from './ConfirmModal';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -73,6 +74,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
 
   // Manual / Search fallback state for users whose browser blocks or cannot detect GPS
   const [showManualPicker, setShowManualPicker] = useState(false);
@@ -642,11 +644,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
                       {onDeleteNote && (
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm('Are you sure you want to delete this note?')) {
-                              onDeleteNote(note.id);
-                            }
-                          }}
+                          onClick={() => setNoteToDelete(note.id)}
                           className="p-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 transition-colors"
                           title="Delete note"
                         >
@@ -726,6 +724,22 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
 
       </div>
+
+      {/* In-App Delete Note Confirmation Modal (Zero Script Alert) */}
+      <ConfirmModal
+        isOpen={!!noteToDelete}
+        onClose={() => setNoteToDelete(null)}
+        title="Delete Note?"
+        message="Are you sure you want to delete this note? This action cannot be undone."
+        confirmLabel="Delete Note"
+        isDestructive={true}
+        onConfirm={() => {
+          if (noteToDelete && onDeleteNote) {
+            onDeleteNote(noteToDelete);
+          }
+          setNoteToDelete(null);
+        }}
+      />
     </div>
   );
 };

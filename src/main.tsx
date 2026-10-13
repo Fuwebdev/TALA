@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HomePage } from './presentation/pages/HomePage';
+import { ToastProvider } from './presentation/components/Toast';
 import './presentation/styles/index.css';
 
 class AppErrorBoundary extends React.Component<
@@ -59,7 +60,9 @@ class AppErrorBoundary extends React.Component<
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AppErrorBoundary>
-      <HomePage />
+      <ToastProvider>
+        <HomePage />
+      </ToastProvider>
     </AppErrorBoundary>
   </React.StrictMode>
 );

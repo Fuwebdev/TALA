@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Heart, MessageSquare, MapPin, AlertTriangle, Share2, Award, Bookmark, Flag, Edit3, Trash2, UserX } from 'lucide-react';
 import { Thought } from '../../domain/entities/Thought';
 import { formatLocationName } from '../../domain/entities/Location';
+import { ConfirmModal } from './ConfirmModal';
 
 interface ThoughtCardProps {
   thought: Thought;
@@ -30,6 +31,13 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmLabel?: string;
+    isDestructive?: boolean;
+  } | null>(null);
 
   const getCategoryBadgeClass = (category: string) => {
     switch (category) {
@@ -151,9 +159,13 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
               {onDelete && (
                 <button
                   onClick={() => {
-                    if (window.confirm('Are you sure you want to delete this note?')) {
-                      onDelete(thought.id);
-                    }
+                    setConfirmAction({
+                      title: 'Delete Note',
+                      message: 'Are you sure you want to delete this note? This action cannot be undone.',
+                      confirmLabel: 'Delete Note',
+                      isDestructive: true,
+                      onConfirm: () => onDelete(thought.id),
+                    });
                   }}
                   className="p-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 transition-colors"
                   title="Delete your note"
@@ -165,6 +177,7 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
           )}
         </div>
       </div>
+
 
 
       {/* Body Content */}
@@ -224,9 +237,13 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
           {!isAuthor && onBlockAuthor && (
             <button
               onClick={() => {
-                if (window.confirm(`Block ${thought.authorAlias.displayName}? You will no longer see notes or comments from this author.`)) {
-                  onBlockAuthor(thought);
-                }
+                setConfirmAction({
+                  title: `Block ${thought.authorAlias.displayName}`,
+                  message: `Are you sure you want to block ${thought.authorAlias.displayName}? You will no longer see notes or comments from this author.`,
+                  confirmLabel: 'Block Author',
+                  isDestructive: true,
+                  onConfirm: () => onBlockAuthor(thought),
+                });
               }}
               className="p-1.5 rounded-xl hover:bg-slate-800 hover:text-amber-400 transition-colors"
               title={`Block ${thought.authorAlias.displayName}`}
@@ -243,7 +260,6 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
             <Flag className="w-3.5 h-3.5 shrink-0" />
           </button>
 
-
           <button
             onClick={handleShare}
             className="p-1.5 rounded-xl hover:bg-slate-800 hover:text-sky-400 transition-colors relative"
@@ -256,6 +272,18 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
 
       </div>
 
+      {/* In-App Confirmation Modal (Zero script alerts) */}
+      <ConfirmModal
+        isOpen={Boolean(confirmAction)}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={confirmAction?.onConfirm || (() => {})}
+        title={confirmAction?.title || ''}
+        message={confirmAction?.message || ''}
+        confirmLabel={confirmAction?.confirmLabel}
+        isDestructive={confirmAction?.isDestructive}
+      />
+
     </article>
   );
 };
+

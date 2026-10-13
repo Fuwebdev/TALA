@@ -42,7 +42,7 @@ export class OpenRouterModerationService {
 
   constructor(apiKey?: string, model?: string) {
     this.apiKey = apiKey || process.env.OPENROUTER_API_KEY || '';
-    this.model = model || process.env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001';
+    this.model = model || process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
     this.endpoint = 'https://openrouter.ai/api/v1/chat/completions';
   }
 

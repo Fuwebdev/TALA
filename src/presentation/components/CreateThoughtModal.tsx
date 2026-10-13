@@ -6,6 +6,8 @@ import { Category } from '../../domain/entities/Thought';
 import { GeolocationService } from '../../application/services/GeolocationService';
 import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
 import { ModerationService } from '../../application/services/ModerationService';
+import { DeviceBanService } from '../../application/services/DeviceBanService';
+import { useToast } from './Toast';
 
 interface CreateThoughtModalProps {
   isOpen: boolean;
@@ -39,6 +41,7 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   onExactLocationDetected,
   onSubmit,
 }) => {
+  const { showToast } = useToast();
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<Category>('Thoughts');
   const [location, setLocation] = useState<Location | null>(initialLocation || null);
@@ -285,6 +288,20 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
           modResult.message ||
             'Your message contains inappropriate language. Please remove offensive words and try again.'
         );
+        try {
+          const violation = await DeviceBanService.recordViolation(
+            modResult.reason || 'Profanity or abusive content in note',
+            body.trim(),
+            currentAlias.id,
+            currentAlias.displayName
+          );
+          showToast(violation.warningMessage, violation.isBanned ? 'error' : 'warning');
+          if (violation.isBanned) {
+            setTimeout(() => {
+              window.location.reload();
+            }, 1200);
+          }
+        } catch {}
         setSubmitting(false);
         return;
       }
