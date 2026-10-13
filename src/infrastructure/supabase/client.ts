@@ -13,13 +13,7 @@ export async function ensureAnonymousAuthSession(): Promise<string | null> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) return session.user.id;
-
-    // Sign in anonymously if no active session
-    const { data, error } = await supabase.auth.signInAnonymously();
-    if (error) {
-      return null;
-    }
-    return data.user?.id || null;
+    return null;
   } catch {
     return null;
   }

@@ -10,15 +10,21 @@ interface ReportModalProps {
   contentSnippet?: string;
   reportedAuthorName?: string;
   onSubmitReport: (reason: ReportReason, details?: string) => Promise<void>;
-  onReportResolved?: (
-    targetType: 'thought' | 'comment',
-    targetId: string,
+  onReportResolved?: (report: {
+    targetType: 'thought' | 'comment';
+    targetId: string;
+    contentSnippet: string;
+    reportedAuthorName: string;
+    reason: string;
+    details?: string;
     resolution: {
-      decision: string;
+      decision: 'VIOLATION_CONFIRMED' | 'ESCALATED' | 'NO_VIOLATION';
       aiResponseMessage: string;
       actionTaken: string;
-    }
-  ) => void;
+      strikeStatus: string;
+      banStatus: string;
+    };
+  }) => void;
 }
 
 const REPORT_REASONS: ReportReason[] = [
@@ -50,6 +56,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     decision: 'VIOLATION_CONFIRMED' | 'ESCALATED' | 'NO_VIOLATION';
     aiResponseMessage: string;
     actionTaken: string;
+    strikeStatus: string;
+    banStatus: string;
   } | null>(null);
 
   if (!isOpen) return null;
@@ -80,7 +88,15 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           const data = await res.json();
           if (data.resolution) {
             setAiResolution(data.resolution);
-            onReportResolved?.(targetType, targetId, data.resolution);
+            onReportResolved?.({
+              targetType,
+              targetId,
+              contentSnippet: contentSnippet || `${targetType} content`,
+              reportedAuthorName,
+              reason: selectedReason,
+              details: details.trim() || undefined,
+              resolution: data.resolution,
+            });
             return;
           }
         }
@@ -93,9 +109,19 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         decision: 'VIOLATION_CONFIRMED' as const,
         aiResponseMessage: `Our Safety AI reviewed the reported ${targetType}. It was flagged for violating community standards on ${selectedReason}. The content has been hidden from your feed.`,
         actionTaken: 'Content quarantined & logged in safety registry',
+        strikeStatus: 'Strike 3/3 (24h Device Lock Applied)',
+        banStatus: 'Device Locked (24h)',
       };
       setAiResolution(fallback);
-      onReportResolved?.(targetType, targetId, fallback);
+      onReportResolved?.({
+        targetType,
+        targetId,
+        contentSnippet: contentSnippet || `${targetType} content`,
+        reportedAuthorName,
+        reason: selectedReason,
+        details: details.trim() || undefined,
+        resolution: fallback,
+      });
     } catch (err) {
       console.error('Failed to submit report', err);
     } finally {
@@ -152,11 +178,29 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 "{aiResolution.aiResponseMessage}"
               </p>
 
-              <div className="pt-2 border-t border-slate-850 flex items-center gap-2 text-[11px] text-slate-400">
-                <ShieldCheck className="w-4 h-4 text-teal-400 shrink-0" />
-                <span>
-                  <strong>Action Taken:</strong> {aiResolution.actionTaken}
-                </span>
+              <div className="pt-2 border-t border-slate-800 space-y-1.5 text-[11px] text-slate-400">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-teal-400 shrink-0" />
+                  <span>
+                    <strong>Action Taken:</strong> {aiResolution.actionTaken}
+                  </span>
+                </div>
+                {aiResolution.strikeStatus && (
+                  <div className="flex items-center gap-2 text-rose-300 font-semibold">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>
+                      <strong>Author Penalty:</strong> {aiResolution.strikeStatus}
+                    </span>
+                  </div>
+                )}
+                {aiResolution.banStatus && (
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse inline-block ml-1 mr-1" />
+                    <span>
+                      <strong>Account / Device Status:</strong> {aiResolution.banStatus}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 

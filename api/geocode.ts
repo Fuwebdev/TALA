@@ -5,16 +5,84 @@
  */
 
 interface GeocodeQuery {
-  lat: number;
-  lng: number;
+  lat?: number;
+  lng?: number;
   zoom?: number;
+  q?: string;
 }
 
 // In-memory server cache to stay well within OSM usage policies
 const geocodeCache = new Map<string, { data: any; expiresAt: number }>();
 
 export async function processGeocodeRequest(query: GeocodeQuery) {
-  const { lat, lng, zoom = 18 } = query;
+  const { lat, lng, zoom = 18, q } = query;
+
+  // Handle Search Query if provided
+  if (q && typeof q === 'string') {
+    const trimmed = q.trim();
+    const cacheKey = `search_${trimmed.toLowerCase()}`;
+    const now = Date.now();
+    const cached = geocodeCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=3600',
+        },
+        body: cached.data,
+      };
+    }
+
+    try {
+      const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+        trimmed
+      )}&countrycodes=ph&addressdetails=1&limit=8`;
+      const response = await fetch(searchUrl, {
+        headers: {
+          'User-Agent': 'Tala-Philippines-App/1.0 (arosobenj@gmail.com)',
+          'Accept-Language': 'en,fil',
+        },
+      });
+
+      if (!response.ok) {
+        return {
+          status: response.status,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+          body: [],
+        };
+      }
+
+      const data = await response.json();
+      geocodeCache.set(cacheKey, {
+        data,
+        expiresAt: now + 60 * 60 * 1000,
+      });
+
+      return {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=3600',
+        },
+        body: data,
+      };
+    } catch (err: any) {
+      return {
+        status: 502,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: [],
+      };
+    }
+  }
 
   if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
     return {

@@ -77,10 +77,13 @@ function apiDevPlugin(): Plugin {
         if (req.url?.startsWith('/api/geocode') && req.method === 'GET') {
           try {
             const url = new URL(req.url, 'http://localhost:5173');
-            const lat = parseFloat(url.searchParams.get('lat') || '');
-            const lng = parseFloat(url.searchParams.get('lon') || url.searchParams.get('lng') || '');
+            const q = url.searchParams.get('q') || undefined;
+            const lat = url.searchParams.has('lat') ? parseFloat(url.searchParams.get('lat') || '') : undefined;
+            const lng = (url.searchParams.has('lon') || url.searchParams.has('lng'))
+              ? parseFloat(url.searchParams.get('lon') || url.searchParams.get('lng') || '')
+              : undefined;
             const zoom = parseInt(url.searchParams.get('zoom') || '18', 10);
-            const result = await processGeocodeRequest({ lat, lng, zoom });
+            const result = await processGeocodeRequest({ lat, lng, zoom, q });
             res.statusCode = result.status;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify(result.body));

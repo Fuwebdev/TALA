@@ -313,19 +313,34 @@ export class GeolocationService {
     if (trimmed.length < 2) return [];
 
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          trimmed
-        )}&countrycodes=ph&addressdetails=1&limit=8`,
-        {
-          headers: {
-            'Accept-Language': 'en',
-          },
+      // 1. Route search through serverless proxy with custom user-agent and CORS handling
+      let items: any[] = [];
+      try {
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
+        if (res.ok) {
+          items = await res.json();
         }
-      );
+      } catch {
+        // Fallback to direct fetch only if local proxy unavailable
+      }
 
-      if (res.ok) {
-        const items: any[] = await res.json();
+      if (!items || items.length === 0) {
+        try {
+          const directRes = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+              trimmed
+            )}&countrycodes=ph&addressdetails=1&limit=8`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          if (directRes.ok) {
+            items = await directRes.json();
+          }
+        } catch {
+          // Fall back gracefully to local matching
+        }
+      }
+
+      if (Array.isArray(items) && items.length > 0) {
         const results: Location[] = [];
         const seen = new Set<string>();
 

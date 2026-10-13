@@ -12,6 +12,7 @@ import { UserSettingsModal } from '../components/UserSettingsModal';
 import { PwaInstallGateModal } from '../components/PwaInstallGateModal';
 import { DeviceLockScreen } from '../components/DeviceLockScreen';
 import { DeviceBanService, DeviceBanStatus } from '../../application/services/DeviceBanService';
+import { ReportHistoryService, UserSubmittedReport } from '../../application/services/ReportHistoryService';
 
 import { createAnonymousAlias, getCachedAlias, saveCachedAlias, Alias } from '../../domain/entities/Alias';
 import { Location } from '../../domain/entities/Location';
@@ -162,7 +163,16 @@ export const HomePage: React.FC = () => {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadingComments, setLoadingComments] = useState<boolean>(false);
 
-  const [reportTarget, setReportTarget] = useState<{ type: 'thought' | 'comment'; id: string } | null>(null);
+  const [reportTarget, setReportTarget] = useState<{
+    type: 'thought' | 'comment';
+    id: string;
+    snippet?: string;
+    authorName?: string;
+    authorAliasId?: string;
+  } | null>(null);
+
+  // User Reports History State
+  const [userReports, setUserReports] = useState<UserSubmittedReport[]>([]);
 
   // Note Edit Modal & User Blocking State
   const [editingThought, setEditingThought] = useState<Thought | null>(null);
@@ -191,10 +201,66 @@ export const HomePage: React.FC = () => {
     }
   };
 
-  // Initialize Session, Service Worker, Device Ban Check, and Domain Verification Tests
+  const loadUserReports = async () => {
+    try {
+      const list = await ReportHistoryService.getReportsForUser(currentAlias.id);
+      setUserReports(list);
+    } catch (e) {
+      console.warn('Failed to load user reports:', e);
+    }
+  };
+
+  const handleReportResolved = async (reportData: {
+    targetType: 'thought' | 'comment';
+    targetId: string;
+    contentSnippet: string;
+    reportedAuthorName: string;
+    reason: string;
+    details?: string;
+    resolution: {
+      decision: 'VIOLATION_CONFIRMED' | 'ESCALATED' | 'NO_VIOLATION';
+      aiResponseMessage: string;
+      actionTaken: string;
+      strikeStatus: string;
+      banStatus: string;
+    };
+  }) => {
+    const reportItem: UserSubmittedReport = {
+      id: `rep_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      targetType: reportData.targetType,
+      targetId: reportData.targetId,
+      contentSnippet: reportData.contentSnippet,
+      reportedAuthorName: reportData.reportedAuthorName,
+      reason: reportData.reason,
+      details: reportData.details,
+      createdAtISO: new Date().toISOString(),
+      aiResolution: reportData.resolution,
+    };
+
+    await ReportHistoryService.recordSubmittedReport(currentAlias.id, reportItem);
+    setUserReports((prev) => [reportItem, ...prev]);
+
+    // If violation is confirmed, automatically quarantine that note or comment from current user's feed
+    if (reportData.resolution.decision === 'VIOLATION_CONFIRMED') {
+      if (reportData.targetType === 'thought') {
+        setThoughts((prev) => prev.filter((t) => t.id !== reportData.targetId));
+        setAllThoughtsForUser((prev) => prev.filter((t) => t.id !== reportData.targetId));
+      } else if (reportData.targetType === 'comment') {
+        setComments((prev) => prev.filter((c) => c.id !== reportData.targetId));
+      }
+    }
+  };
+
+  const handleDeleteReport = async (reportId: string) => {
+    await ReportHistoryService.deleteReport(currentAlias.id, reportId);
+    setUserReports((prev) => prev.filter((r) => r.id !== reportId));
+  };
+
+  // Initialize Session, Service Worker, Device Ban Check, User Reports, and Domain Verification Tests
   useEffect(() => {
     ensureAnonymousAuthSession();
     checkDeviceBan();
+    loadUserReports();
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(err => {
@@ -204,7 +270,7 @@ export const HomePage: React.FC = () => {
 
     const testResult = runDomainVerificationTests();
     console.log('[Tala System Verification]', testResult.passed ? 'ALL PASSED' : 'FAILED', testResult.log);
-  }, []);
+  }, [currentAlias.id]);
 
   // Persist and register an exact reverse-geocoded location + 5km nearby addresses into state, localStorage & Supabase
   const registerExactLocation = async (
@@ -704,22 +770,22 @@ export const HomePage: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto shrink-0">
                 <button
                   onClick={handleAllowUserLocation}
                   disabled={isLocating}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-sky-500/30 text-sky-300 text-xs font-semibold transition-all disabled:opacity-50"
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-sky-500/30 text-sky-300 text-xs font-semibold transition-all disabled:opacity-50 active:scale-95"
                 >
                   <Navigation className={`w-3.5 h-3.5 text-sky-400 ${isLocating ? 'animate-spin' : ''}`} />
-                  <span>{isLocating ? 'Locating...' : 'Allow Location'}</span>
+                  <span className="truncate">{isLocating ? 'Locating...' : 'Allow GPS'}</span>
                 </button>
 
                 <button
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition-all"
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-teal-500 hover:from-sky-400 hover:to-teal-400 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition-all active:scale-95"
                 >
                   <PlusCircle className="w-3.5 h-3.5" />
-                  <span>Leave a Note</span>
+                  <span className="truncate">Leave a Note</span>
                 </button>
               </div>
             </div>
@@ -851,7 +917,15 @@ export const HomePage: React.FC = () => {
                   }}
                   onOpenComments={handleOpenComments}
                   onToggleSave={handleToggleSave}
-                  onReport={(t) => setReportTarget({ type: 'thought', id: t.id })}
+                  onReport={(t) =>
+                    setReportTarget({
+                      type: 'thought',
+                      id: t.id,
+                      snippet: t.body,
+                      authorName: t.authorAlias.displayName,
+                      authorAliasId: t.authorAlias.id,
+                    })
+                  }
                   onSelectLocation={(locId) => {
                     const loc = locations.find(l => l.id === locId);
                     if (loc) setSelectedLocation(loc);
@@ -922,6 +996,8 @@ export const HomePage: React.FC = () => {
         currentAlias={currentAlias}
         userNotes={myNotes}
         blockedUserIds={blockedUserIds}
+        userReports={userReports}
+        onDeleteReport={handleDeleteReport}
         onSaveUsername={handleSaveUsername}
         onRequestLocation={handleAllowUserLocation}
         onRequestIpLocation={handleAllowNetworkLocation}
@@ -968,17 +1044,27 @@ export const HomePage: React.FC = () => {
         comments={comments.filter(c => !isAuthorBlocked(c.authorAlias))}
         loading={loadingComments}
         onAddComment={handleAddComment}
-        onReportComment={(commentId) => setReportTarget({ type: 'comment', id: commentId })}
+        onReportComment={(comment) =>
+          setReportTarget({
+            type: 'comment',
+            id: comment.id,
+            snippet: comment.body,
+            authorName: comment.authorAlias.displayName,
+            authorAliasId: comment.authorAlias.id,
+          })
+        }
         onBlockUser={(aliasId, aliasName) => handleBlockUser(aliasId, aliasName)}
       />
-
 
       <ReportModal
         isOpen={Boolean(reportTarget)}
         onClose={() => setReportTarget(null)}
         targetType={reportTarget?.type || 'thought'}
         targetId={reportTarget?.id || ''}
+        contentSnippet={reportTarget?.snippet || ''}
+        reportedAuthorName={reportTarget?.authorName || 'Anonymous'}
         onSubmitReport={handleSubmitReport}
+        onReportResolved={handleReportResolved}
       />
 
       {/* Footer */}

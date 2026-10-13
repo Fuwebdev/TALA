@@ -16,7 +16,7 @@ interface CommentsDrawerProps {
   comments: Comment[];
   loading: boolean;
   onAddComment: (thoughtId: string, body: string) => Promise<void>;
-  onReportComment: (commentId: string) => void;
+  onReportComment: (comment: Comment) => void;
   onBlockUser?: (aliasId: string, aliasName: string) => void;
 }
 
@@ -145,7 +145,7 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
                       </button>
                     )}
                     <button
-                      onClick={() => onReportComment(c.id)}
+                      onClick={() => onReportComment(c)}
                       className="text-slate-500 hover:text-rose-400 transition-colors p-1"
                       title="Report comment"
                     >

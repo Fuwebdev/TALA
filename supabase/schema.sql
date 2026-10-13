@@ -169,6 +169,8 @@ CREATE TABLE IF NOT EXISTS public.reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_status ON public.reports(status);
 CREATE INDEX IF NOT EXISTS idx_reports_target ON public.reports(target_type, target_id);
+ALTER TABLE public.reports ALTER COLUMN reporter_profile_id DROP NOT NULL;
+ALTER TABLE public.reports ADD COLUMN IF NOT EXISTS reporter_alias_id VARCHAR(128);
 
 -- AI Automated Report Resolutions Log
 CREATE TABLE IF NOT EXISTS public.ai_report_resolutions (
