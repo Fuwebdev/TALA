@@ -167,68 +167,42 @@ export class GeolocationService {
     const nearbyMap = new Map<string, { loc: Location; distanceKm: number }>();
     const currentKey = currentLocation.cityMunicipality.toLowerCase().trim();
 
-    // Extract base city name (e.g., "Barangay X, Quezon City" -> "Quezon City")
-    const parts = currentLocation.cityMunicipality.split(',').map((s) => s.trim());
-    const parentCity = parts.length > 1 ? parts[parts.length - 1] : currentLocation.cityMunicipality;
+    // 1. Include the user's exact reverse-geocoded location at distance 0
+    nearbyMap.set(currentKey, {
+      distanceKm: 0,
+      loc: currentLocation,
+    });
 
-    try {
-      // Query OpenStreetMap Overpass API for named barangays/suburbs/neighborhoods/villages within 5000m (5km)
-      const overpassQuery = `[out:json][timeout:8];(node(around:5000,${lat},${lng})["place"~"suburb|village|neighbourhood|quarter|hamlet|town|city_block"];);out body 25;`;
-      const res = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: overpassQuery,
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const elements: any[] = data.elements || [];
-
-        for (const el of elements) {
-          const name = el.tags?.['name:en'] || el.tags?.name;
-          if (!name || typeof el.lat !== 'number' || typeof el.lon !== 'number') continue;
-
-          const distKm = this.calculateDistanceKm(lat, lng, el.lat, el.lon);
-          if (distKm > 5.0) continue; // Strictly enforce 5km radius
-
-          const formattedCity =
-            name.toLowerCase().includes(parentCity.toLowerCase())
-              ? name
-              : `${name}, ${parentCity}`;
-
-          const key = formattedCity.toLowerCase().trim();
-          if (key === currentKey || nearbyMap.has(key)) continue;
-
-          nearbyMap.set(key, {
-            distanceKm: distKm,
-            loc: {
-              id: generateUUID(),
-              region: currentLocation.region,
-              province: currentLocation.province,
-              cityMunicipality: formattedCity,
-              coordinates: { lat: el.lat, lng: el.lon },
-            },
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('[GeolocationService] Overpass 5km nearby lookup notice:', err);
-    }
-
-    // If Overpass returned fewer than 3 nearby places, supplement with closest Philippine locations
-    if (nearbyMap.size < 3) {
-      for (const loc of PHILIPPINE_LOCATIONS) {
-        const distKm = this.calculateDistanceKm(lat, lng, loc.coordinates.lat, loc.coordinates.lng);
-        if (distKm <= 20.0) {
-          const key = loc.cityMunicipality.toLowerCase().trim();
-          if (key !== currentKey && !nearbyMap.has(key)) {
-            nearbyMap.set(key, { distanceKm: distKm, loc });
-          }
+    // 2. Efficiently match real Philippine locations sorted by geodesic proximity
+    for (const loc of PHILIPPINE_LOCATIONS) {
+      const distKm = this.calculateDistanceKm(lat, lng, loc.coordinates.lat, loc.coordinates.lng);
+      if (distKm <= 35.0) {
+        const key = loc.cityMunicipality.toLowerCase().trim();
+        if (!nearbyMap.has(key)) {
+          nearbyMap.set(key, { distanceKm: distKm, loc });
         }
       }
     }
 
+    // 3. If fewer than 4 results, supplement with the 5 closest known Philippine hubs
+    if (nearbyMap.size < 4) {
+      const sortedAll = [...PHILIPPINE_LOCATIONS]
+        .map((loc) => ({
+          loc,
+          distanceKm: this.calculateDistanceKm(lat, lng, loc.coordinates.lat, loc.coordinates.lng),
+        }))
+        .sort((a, b) => a.distanceKm - b.distanceKm)
+        .slice(0, 5);
 
-    // Sort by closest distance first (all <= 5km)
+      for (const item of sortedAll) {
+        const key = item.loc.cityMunicipality.toLowerCase().trim();
+        if (!nearbyMap.has(key)) {
+          nearbyMap.set(key, item);
+        }
+      }
+    }
+
+    // Sort strictly by closest distance first
     return Array.from(nearbyMap.values())
       .sort((a, b) => a.distanceKm - b.distanceKm)
       .slice(0, 15)
