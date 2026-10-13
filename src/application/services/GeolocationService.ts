@@ -6,6 +6,7 @@ export interface GeolocationResult {
     lng: number;
   };
   exactLocation: Location;
+  nearbyLocations: Location[];
   formattedAddress: string;
 }
 
@@ -21,6 +22,28 @@ function generateUUID(): string {
 }
 
 export class GeolocationService {
+  /**
+   * Calculates Haversine distance in kilometers between two GPS coordinates.
+   */
+  public static calculateDistanceKm(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number
+  ): number {
+    const R = 6371; // Earth radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
   /**
    * Reverse geocodes exact GPS coordinates (latitude, longitude) into the user's real-world
    * Barangay / Street / City / Province / Region using OpenStreetMap Nominatim & BigDataCloud.
@@ -120,7 +143,99 @@ export class GeolocationService {
   }
 
   /**
-   * Requests browser GPS permission and resolves with the user's exact reverse-geocoded location.
+   * Fetches real nearby barangays, neighborhoods, streets, and localities within a 5km radius
+   * of the user's current coordinates.
+   */
+  public static async getNearbyLocationsWithin5km(
+    lat: number,
+    lng: number,
+    currentLocation: Location
+  ): Promise<Location[]> {
+    const nearbyMap = new Map<string, { loc: Location; distanceKm: number }>();
+    const currentKey = currentLocation.cityMunicipality.toLowerCase().trim();
+
+    // Extract base city name (e.g., "Barangay X, Quezon City" -> "Quezon City")
+    const parts = currentLocation.cityMunicipality.split(',').map((s) => s.trim());
+    const parentCity = parts.length > 1 ? parts[parts.length - 1] : currentLocation.cityMunicipality;
+
+    try {
+      // Query OpenStreetMap Overpass API for named barangays/suburbs/neighborhoods/villages within 5000m (5km)
+      const overpassQuery = `[out:json][timeout:8];(node(around:5000,${lat},${lng})["place"~"suburb|village|neighbourhood|quarter|hamlet|town|city_block"];);out body 25;`;
+      const res = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: overpassQuery,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const elements: any[] = data.elements || [];
+
+        for (const el of elements) {
+          const name = el.tags?.['name:en'] || el.tags?.name;
+          if (!name || typeof el.lat !== 'number' || typeof el.lon !== 'number') continue;
+
+          const distKm = this.calculateDistanceKm(lat, lng, el.lat, el.lon);
+          if (distKm > 5.0) continue; // Strictly enforce 5km radius
+
+          const formattedCity =
+            name.toLowerCase().includes(parentCity.toLowerCase())
+              ? name
+              : `${name}, ${parentCity}`;
+
+          const key = formattedCity.toLowerCase().trim();
+          if (key === currentKey || nearbyMap.has(key)) continue;
+
+          nearbyMap.set(key, {
+            distanceKm: distKm,
+            loc: {
+              id: generateUUID(),
+              region: currentLocation.region,
+              province: currentLocation.province,
+              cityMunicipality: formattedCity,
+              coordinates: { lat: el.lat, lng: el.lon },
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[GeolocationService] Overpass 5km nearby lookup notice:', err);
+    }
+
+    // If Overpass returned fewer than 3 nearby places, sample 4 cardinal points ~2.2km away via BigDataCloud/Nominatim
+    if (nearbyMap.size < 3) {
+      const offsets = [
+        { dLat: 0.018, dLng: 0 },     // ~2.0 km North
+        { dLat: -0.018, dLng: 0 },    // ~2.0 km South
+        { dLat: 0, dLng: 0.018 },     // ~2.0 km East
+        { dLat: 0, dLng: -0.018 },    // ~2.0 km West
+      ];
+
+      await Promise.allSettled(
+        offsets.map(async (offset) => {
+          const sampleLat = lat + offset.dLat;
+          const sampleLng = lng + offset.dLng;
+          const distKm = this.calculateDistanceKm(lat, lng, sampleLat, sampleLng);
+          if (distKm > 5.0) return;
+
+          const loc = await this.reverseGeocode(sampleLat, sampleLng);
+          const key = loc.cityMunicipality.toLowerCase().trim();
+          if (key !== currentKey && !nearbyMap.has(key)) {
+            nearbyMap.set(key, { distanceKm: distKm, loc });
+          }
+        })
+      );
+    }
+
+    // Sort by closest distance first (all <= 5km)
+    return Array.from(nearbyMap.values())
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, 15)
+      .map((entry) => entry.loc);
+  }
+
+  /**
+   * Requests browser GPS permission and resolves with the user's exact reverse-geocoded location
+   * plus nearby addresses within a 5km radius.
    */
   public static async detectUserLocation(): Promise<GeolocationResult> {
     return new Promise((resolve, reject) => {
@@ -133,11 +248,17 @@ export class GeolocationService {
         async (position) => {
           const { latitude, longitude } = position.coords;
           const exactLocation = await this.reverseGeocode(latitude, longitude);
+          const nearbyLocations = await this.getNearbyLocationsWithin5km(
+            latitude,
+            longitude,
+            exactLocation
+          );
           const formattedAddress = `${exactLocation.cityMunicipality}, ${exactLocation.province}`;
 
           resolve({
             coords: { lat: latitude, lng: longitude },
             exactLocation,
+            nearbyLocations,
             formattedAddress,
           });
         },

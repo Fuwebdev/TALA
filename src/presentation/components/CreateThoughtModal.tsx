@@ -11,7 +11,13 @@ interface CreateThoughtModalProps {
   currentAlias: Alias;
   locations: Location[];
   selectedLocation: Location | null;
-  onExactLocationDetected?: (location: Location, coords: { lat: number; lng: number }) => Promise<Location>;
+  userGpsCoords?: { lat: number; lng: number } | null;
+  nearbyLocations?: Location[];
+  onExactLocationDetected?: (
+    location: Location,
+    coords: { lat: number; lng: number },
+    nearby5km?: Location[]
+  ) => Promise<Location>;
   onSubmit: (params: {
     body: string;
     category: Category;
@@ -26,12 +32,16 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   currentAlias,
   locations,
   selectedLocation: initialLocation,
+  userGpsCoords,
+  nearbyLocations = [],
   onExactLocationDetected,
   onSubmit,
 }) => {
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<Category>('Thoughts');
   const [location, setLocation] = useState<Location | null>(initialLocation || null);
+  const [localNearby5km, setLocalNearby5km] = useState<Location[]>(nearbyLocations);
+  const [loadingNearby, setLoadingNearby] = useState(false);
   const [isEnvironmentalAlert, setIsEnvironmentalAlert] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,20 +49,110 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   const [detectingGps, setDetectingGps] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
 
+  // Base reference coordinates (user's exact GPS or initial selected location)
+  const anchorCoords = useMemo(() => {
+    if (userGpsCoords) return userGpsCoords;
+    if (initialLocation?.coordinates) return initialLocation.coordinates;
+    if (location?.coordinates) return location.coordinates;
+    return null;
+  }, [userGpsCoords, initialLocation, location]);
+
   useEffect(() => {
     if (initialLocation) {
       setLocation(initialLocation);
-    } else if (locations.length > 0 && !location) {
-      setLocation(locations[0]);
     }
-  }, [initialLocation, locations]);
+  }, [initialLocation]);
 
-  // Ensure the active exact location is always in the dropdown options (Must be called BEFORE early return)
-  const dropdownLocations = useMemo(() => {
-    if (!location) return locations;
-    const exists = locations.some(l => l.id === location.id);
-    return exists ? locations : [location, ...locations];
-  }, [locations, location]);
+  useEffect(() => {
+    if (nearbyLocations.length > 0) {
+      setLocalNearby5km(nearbyLocations);
+    }
+  }, [nearbyLocations]);
+
+  // Automatically fetch 5km nearby addresses when modal opens if not yet populated
+  useEffect(() => {
+    if (!isOpen) return;
+    const baseLoc = initialLocation || location;
+    if (!baseLoc || !baseLoc.coordinates) return;
+
+    if (localNearby5km.length === 0) {
+      setLoadingNearby(true);
+      GeolocationService.getNearbyLocationsWithin5km(
+        baseLoc.coordinates.lat,
+        baseLoc.coordinates.lng,
+        baseLoc
+      )
+        .then((nearby) => {
+          setLocalNearby5km(nearby);
+        })
+        .catch(() => {})
+        .finally(() => {
+          setLoadingNearby(false);
+        });
+    }
+  }, [isOpen, initialLocation]);
+
+  // Build dropdown list with ONLY Current Location + Nearby Locations within 5km radius (All Hooks above early return)
+  const nearbyDropdownOptions = useMemo(() => {
+    const baseLoc = initialLocation || location;
+    if (!baseLoc || !anchorCoords) return [];
+
+    const optionsMap = new Map<string, { loc: Location; distKm: number; isCurrent: boolean }>();
+
+    // 1. Always put Current Location first (0.0 km)
+    optionsMap.set(baseLoc.cityMunicipality.toLowerCase().trim(), {
+      loc: baseLoc,
+      distKm: 0,
+      isCurrent: true,
+    });
+
+    // If user selected one of the nearby options, ensure it's also in the map
+    if (location && location.id !== baseLoc.id) {
+      const d = GeolocationService.calculateDistanceKm(
+        anchorCoords.lat,
+        anchorCoords.lng,
+        location.coordinates.lat,
+        location.coordinates.lng
+      );
+      if (d <= 5.0) {
+        optionsMap.set(location.cityMunicipality.toLowerCase().trim(), {
+          loc: location,
+          distKm: d,
+          isCurrent: false,
+        });
+      }
+    }
+
+    // 2. Add fetched nearby addresses within 5km radius
+    const candidates = [...localNearby5km, ...locations];
+    for (const item of candidates) {
+      if (!item?.coordinates) continue;
+      const distKm = GeolocationService.calculateDistanceKm(
+        anchorCoords.lat,
+        anchorCoords.lng,
+        item.coordinates.lat,
+        item.coordinates.lng
+      );
+
+      // Strictly filter out anything outside 5km radius
+      if (distKm <= 5.0) {
+        const key = item.cityMunicipality.toLowerCase().trim();
+        if (!optionsMap.has(key)) {
+          optionsMap.set(key, {
+            loc: item,
+            distKm,
+            isCurrent: false,
+          });
+        }
+      }
+    }
+
+    return Array.from(optionsMap.values()).sort((a, b) => {
+      if (a.isCurrent) return -1;
+      if (b.isCurrent) return 1;
+      return a.distKm - b.distKm;
+    });
+  }, [initialLocation, location, localNearby5km, locations, anchorCoords]);
 
   if (!isOpen) return null;
 
@@ -64,10 +164,17 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
       const result = await GeolocationService.detectUserLocation();
       let persistedLoc = result.exactLocation;
       if (onExactLocationDetected) {
-        persistedLoc = await onExactLocationDetected(result.exactLocation, result.coords);
+        persistedLoc = await onExactLocationDetected(
+          result.exactLocation,
+          result.coords,
+          result.nearbyLocations
+        );
       }
       setLocation(persistedLoc);
-      setGpsStatus(`Exact location detected: ${persistedLoc.cityMunicipality}, ${persistedLoc.province}`);
+      setLocalNearby5km(result.nearbyLocations);
+      setGpsStatus(
+        `Current location & ${result.nearbyLocations.length} nearby addresses (within 5km) loaded`
+      );
     } catch (err: any) {
       setError(err.message || 'Unable to detect your exact location.');
     } finally {
@@ -81,9 +188,9 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
       setError('Please write a note before publishing.');
       return;
     }
-    const targetLocation = location || locations[0];
+    const targetLocation = location || nearbyDropdownOptions[0]?.loc;
     if (!targetLocation) {
-      setError('Please allow your location or select a location.');
+      setError('Please allow your location first to select your current or nearby 5km address.');
       return;
     }
 
@@ -120,7 +227,9 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm sm:text-base font-bold text-white">Leave a Note Where You Are</h2>
-              <p className="text-[10px] sm:text-[11px] text-slate-400">Posting anonymously as <strong className="text-teal-400">{currentAlias?.displayName || 'Anonymous'}</strong></p>
+              <p className="text-[10px] sm:text-[11px] text-slate-400">
+                Posting anonymously as <strong className="text-teal-400">{currentAlias?.displayName || 'Anonymous'}</strong>
+              </p>
             </div>
           </div>
           <button
@@ -134,22 +243,27 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto pr-1 flex-1">
           
-          {/* Step 1: Allow Location or Choose City */}
+          {/* Step 1: Current Location & Nearby 5km Radius Dropdown */}
           <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
-              <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-sky-400" />
-                Where are you right now?
-              </label>
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-sky-400" />
+                  Where are you right now?
+                </label>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Showing your current location & nearby addresses within 5km radius
+                </p>
+              </div>
 
               <button
                 type="button"
                 onClick={handleUseMyCurrentLocation}
                 disabled={detectingGps}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-[11px] font-semibold transition-all disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-[11px] font-semibold transition-all disabled:opacity-50 shrink-0"
               >
                 <Navigation className={`w-3 h-3 text-sky-400 ${detectingGps ? 'animate-spin' : ''}`} />
-                <span>{detectingGps ? 'Detecting Exact Location...' : 'Allow My Location'}</span>
+                <span>{detectingGps ? 'Detecting...' : 'Refresh GPS'}</span>
               </button>
             </div>
 
@@ -164,24 +278,32 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
               <select
                 value={location?.id || ''}
                 onChange={(e) => {
-                  const found = dropdownLocations.find(l => l.id === e.target.value);
+                  const found = nearbyDropdownOptions.find((entry) => entry.loc.id === e.target.value);
                   if (found) {
-                    setLocation(found);
+                    setLocation(found.loc);
                     setGpsStatus(null);
                   }
                 }}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-sky-500/50"
+                className="w-full px-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-sky-500/50"
               >
-                {dropdownLocations.length === 0 ? (
-                  <option value="">Click "Allow My Location" to detect where you are...</option>
+                {nearbyDropdownOptions.length === 0 ? (
+                  <option value="">Click "Refresh GPS" to detect your current & 5km nearby addresses...</option>
                 ) : (
-                  dropdownLocations.map(loc => (
+                  nearbyDropdownOptions.map(({ loc, distKm, isCurrent }) => (
                     <option key={loc.id} value={loc.id}>
-                      📍 {loc.cityMunicipality}, {loc.province} ({loc.region})
+                      {isCurrent
+                        ? `📍 [Current Location] ${loc.cityMunicipality}, ${loc.province}`
+                        : `🧭 [${distKm.toFixed(1)} km away] ${loc.cityMunicipality}, ${loc.province}`}
                     </option>
                   ))
                 )}
               </select>
+
+              {loadingNearby && (
+                <p className="text-[10px] text-sky-400 mt-1 animate-pulse">
+                  Scanning nearby addresses within 5km radius...
+                </p>
+              )}
             </div>
           </div>
 

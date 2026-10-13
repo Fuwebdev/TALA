@@ -104,7 +104,7 @@ export const HomePage: React.FC = () => {
     return null;
   });
 
-  // Live User Geolocation State (Cached across refreshes)
+  // Live User Geolocation State & 5km Nearby Locations (Cached across refreshes)
   const [userGpsCoords, setUserGpsCoords] = useState<{ lat: number; lng: number } | null>(() => {
     try {
       const savedGps = localStorage.getItem('tala_cached_user_gps_v1');
@@ -116,6 +116,19 @@ export const HomePage: React.FC = () => {
     }
     return null;
   });
+
+  const [nearby5kmLocations, setNearby5kmLocations] = useState<Location[]>(() => {
+    try {
+      const savedNearby = localStorage.getItem('tala_cached_nearby_5km_v1');
+      if (savedNearby) {
+        return JSON.parse(savedNearby) as Location[];
+      }
+    } catch {
+      // Ignore storage error
+    }
+    return [];
+  });
+
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [locationBannerMsg, setLocationBannerMsg] = useState<string | null>(null);
 
@@ -153,39 +166,49 @@ export const HomePage: React.FC = () => {
     console.log('[Tala System Verification]', testResult.passed ? 'ALL PASSED' : 'FAILED', testResult.log);
   }, []);
 
-  // Persist and register an exact reverse-geocoded location into state, localStorage & Supabase
-  const registerExactLocation = async (exactLoc: Location, coords: { lat: number; lng: number }): Promise<Location> => {
+  // Persist and register an exact reverse-geocoded location + 5km nearby addresses into state, localStorage & Supabase
+  const registerExactLocation = async (
+    exactLoc: Location,
+    coords: { lat: number; lng: number },
+    nearby5km?: Location[]
+  ): Promise<Location> => {
     const persisted = await locationRepo.ensureLocationPersisted(exactLoc);
     setUserGpsCoords(coords);
+
+    const resolvedNearby =
+      nearby5km && nearby5km.length > 0
+        ? nearby5km
+        : await GeolocationService.getNearbyLocationsWithin5km(coords.lat, coords.lng, persisted);
+
+    setNearby5kmLocations(resolvedNearby);
+
     try {
       localStorage.setItem('tala_cached_user_location_v1', JSON.stringify(persisted));
       localStorage.setItem('tala_cached_user_gps_v1', JSON.stringify(coords));
+      localStorage.setItem('tala_cached_nearby_5km_v1', JSON.stringify(resolvedNearby));
     } catch {
       // Ignore storage error
     }
-    setLocations((prev) => {
-      const exists = prev.some(
-        (l) => l.id === persisted.id || l.cityMunicipality.toLowerCase() === persisted.cityMunicipality.toLowerCase()
-      );
-      if (exists) {
-        return prev.map((l) =>
-          l.cityMunicipality.toLowerCase() === persisted.cityMunicipality.toLowerCase() ? persisted : l
-        );
-      }
-      return [persisted, ...prev];
-    });
+
+    setLocations([persisted, ...resolvedNearby]);
     setSelectedLocation(persisted);
     return persisted;
   };
 
-  // Request Browser GPS Location & Reverse Geocode Exact Address
+  // Request Browser GPS Location & Reverse Geocode Exact Address + 5km Radius Nearby Addresses
   const handleAllowUserLocation = async (): Promise<Location | null> => {
     setIsLocating(true);
     setLocationBannerMsg(null);
     try {
       const result = await GeolocationService.detectUserLocation();
-      const persistedLoc = await registerExactLocation(result.exactLocation, result.coords);
-      setLocationBannerMsg(`Exact location detected: ${persistedLoc.cityMunicipality}, ${persistedLoc.province}`);
+      const persistedLoc = await registerExactLocation(
+        result.exactLocation,
+        result.coords,
+        result.nearbyLocations
+      );
+      setLocationBannerMsg(
+        `Exact location detected: ${persistedLoc.cityMunicipality}, ${persistedLoc.province} (+${result.nearbyLocations.length} nearby within 5km)`
+      );
       return persistedLoc;
     } catch (err: any) {
       setLocationBannerMsg(err.message || 'Could not detect your exact location.');
@@ -198,22 +221,31 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     locationRepo.getAllLocations().then(async (data) => {
       let cachedLoc: Location | null = null;
+      let cachedNearby: Location[] = [];
       try {
         const raw = localStorage.getItem('tala_cached_user_location_v1');
         if (raw) cachedLoc = JSON.parse(raw) as Location;
+        const rawNearby = localStorage.getItem('tala_cached_nearby_5km_v1');
+        if (rawNearby) cachedNearby = JSON.parse(rawNearby) as Location[];
       } catch {
         // Ignore
       }
 
       if (cachedLoc) {
-        const merged = data.some(
-          (l) => l.id === cachedLoc!.id || l.cityMunicipality.toLowerCase() === cachedLoc!.cityMunicipality.toLowerCase()
-        )
-          ? data.map((l) =>
-              l.cityMunicipality.toLowerCase() === cachedLoc!.cityMunicipality.toLowerCase() ? cachedLoc! : l
-            )
-          : [cachedLoc, ...data];
-        setLocations(merged);
+        if (cachedNearby.length === 0 && cachedLoc.coordinates) {
+          cachedNearby = await GeolocationService.getNearbyLocationsWithin5km(
+            cachedLoc.coordinates.lat,
+            cachedLoc.coordinates.lng,
+            cachedLoc
+          );
+          setNearby5kmLocations(cachedNearby);
+          try {
+            localStorage.setItem('tala_cached_nearby_5km_v1', JSON.stringify(cachedNearby));
+          } catch {
+            // Ignore
+          }
+        }
+        setLocations([cachedLoc, ...cachedNearby]);
         setSelectedLocation(cachedLoc);
 
         // Refresh live GPS coordinates silently if permission is granted
@@ -228,10 +260,10 @@ export const HomePage: React.FC = () => {
             .catch(() => {});
         }
       } else {
-        setLocations(data);
-        // Try detecting user's real GPS location first before falling back to Quezon City
+        // Try detecting user's real GPS location + 5km nearby addresses first
         const detected = await handleAllowUserLocation();
         if (!detected && data.length > 0) {
+          setLocations([data[0]]);
           setSelectedLocation((prev) => prev || data[0]);
         }
       }
@@ -630,6 +662,8 @@ export const HomePage: React.FC = () => {
         currentAlias={currentAlias}
         locations={locations}
         selectedLocation={selectedLocation || locations[0] || null}
+        userGpsCoords={userGpsCoords}
+        nearbyLocations={nearby5kmLocations}
         onExactLocationDetected={registerExactLocation}
         onSubmit={handleCreateThought}
       />
