@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, ExternalLink, CheckCircle2, Sparkles, ShieldCheck } from 'lucide-react';
+import { Download, ExternalLink, CheckCircle2, Sparkles, ShieldCheck, X } from 'lucide-react';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -18,10 +18,12 @@ declare global {
 
 interface PwaInstallGateModalProps {
   onInstalledOrContinue: () => void;
+  onClose?: () => void;
 }
 
 export const PwaInstallGateModal: React.FC<PwaInstallGateModalProps> = ({
   onInstalledOrContinue,
+  onClose,
 }) => {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(
     () => window.__deferredPwaPrompt || null
@@ -142,6 +144,18 @@ export const PwaInstallGateModal: React.FC<PwaInstallGateModalProps> = ({
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-xl animate-fadeIn">
       <div className="relative w-full max-w-md bg-slate-900 border border-sky-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl text-center space-y-5">
         
+        {/* Optional Close Button */}
+        {onClose && (
+          <button
+            type="button"
+            aria-label="Close install prompt"
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
+
         {/* Official Tala App Icon */}
         <div className="relative mx-auto w-24 h-24">
           <img
@@ -207,6 +221,17 @@ export const PwaInstallGateModal: React.FC<PwaInstallGateModalProps> = ({
             <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 pt-1">
               <ShieldCheck className="w-3.5 h-3.5 text-teal-400 shrink-0" />
               <span>Instant direct PWA installation • No manual home screen setup</span>
+            </div>
+
+            {/* Skip / Continue in Browser Link */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={onClose || onInstalledOrContinue}
+                className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-4 transition-colors"
+              >
+                Continue in browser without installing
+              </button>
             </div>
           </div>
         )}

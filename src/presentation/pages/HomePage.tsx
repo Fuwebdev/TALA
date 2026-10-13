@@ -65,6 +65,21 @@ export const HomePage: React.FC = () => {
   const reportContentUseCase = useMemo(() => new ReportContentUseCase(thoughtRepo), [thoughtRepo]);
   const toggleSaveThoughtUseCase = useMemo(() => new ToggleSaveThoughtUseCase(thoughtRepo), [thoughtRepo]);
 
+  // Standalone PWA detection & installation status
+  const [isAppInstalled, setIsAppInstalled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+    let alreadyInstalled = false;
+    try {
+      alreadyInstalled = localStorage.getItem('tala_pwa_installed_v1') === 'true';
+    } catch {
+      // Ignore
+    }
+    return isStandalone || alreadyInstalled;
+  });
+
   // Direct PWA Install Gate State (Show install prompt first before username/location onboarding)
   const [showPwaInstallGate, setShowPwaInstallGate] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -254,6 +269,47 @@ export const HomePage: React.FC = () => {
   const handleDeleteReport = async (reportId: string) => {
     await ReportHistoryService.deleteReport(currentAlias.id, reportId);
     setUserReports((prev) => prev.filter((r) => r.id !== reportId));
+  };
+
+  // Listen for PWA installation events to automatically remove install buttons across the UI
+  useEffect(() => {
+    const handleInstalled = () => {
+      setIsAppInstalled(true);
+      setShowPwaInstallGate(false);
+      try {
+        localStorage.setItem('tala_pwa_installed_v1', 'true');
+      } catch {}
+    };
+
+    window.addEventListener('appinstalled', handleInstalled);
+    window.addEventListener('tala-pwa-installed', handleInstalled);
+    return () => {
+      window.removeEventListener('appinstalled', handleInstalled);
+      window.removeEventListener('tala-pwa-installed', handleInstalled);
+    };
+  }, []);
+
+  const handleTriggerInstall = async () => {
+    const promptEvent = (window as any).__deferredPwaPrompt;
+    if (promptEvent) {
+      try {
+        await promptEvent.prompt();
+        const choice = await promptEvent.userChoice;
+        if (choice.outcome === 'accepted') {
+          setIsAppInstalled(true);
+          setShowPwaInstallGate(false);
+          try {
+            localStorage.setItem('tala_pwa_installed_v1', 'true');
+          } catch {}
+          (window as any).__deferredPwaPrompt = null;
+          return;
+        }
+      } catch (err) {
+        console.warn('Install prompt error:', err);
+      }
+    }
+    // If no direct prompt ready or in another browser/iOS, show the install modal guide
+    setShowPwaInstallGate(true);
   };
 
   // Initialize Session, Service Worker, Device Ban Check, User Reports, and Domain Verification Tests
@@ -745,6 +801,8 @@ export const HomePage: React.FC = () => {
         onRequestGeoLocation={handleAllowUserLocation}
         isLocating={isLocating}
         selectedCityName={selectedLocation?.cityMunicipality}
+        isAppInstalled={isAppInstalled}
+        onInstallApp={handleTriggerInstall}
       />
 
       {/* Main Content Layout */}
@@ -978,9 +1036,12 @@ export const HomePage: React.FC = () => {
       </main>
 
       {/* Modals & Drawers */}
-      {showPwaInstallGate && (
+      {showPwaInstallGate && !isAppInstalled && (
         <PwaInstallGateModal
           onInstalledOrContinue={() => {
+            setShowPwaInstallGate(false);
+          }}
+          onClose={() => {
             setShowPwaInstallGate(false);
           }}
         />

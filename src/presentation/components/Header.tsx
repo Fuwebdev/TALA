@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, Plus, ShieldCheck, Navigation, Settings } from 'lucide-react';
+import { MapPin, Plus, ShieldCheck, Navigation, Settings, Download } from 'lucide-react';
 import { Alias } from '../../domain/entities/Alias';
 
 interface HeaderProps {
@@ -9,6 +9,8 @@ interface HeaderProps {
   onRequestGeoLocation: () => void;
   isLocating?: boolean;
   selectedCityName?: string;
+  isAppInstalled?: boolean;
+  onInstallApp?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +20,8 @@ export const Header: React.FC<HeaderProps> = ({
   onRequestGeoLocation,
   isLocating = false,
   selectedCityName,
+  isAppInstalled = false,
+  onInstallApp,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80 px-3 sm:px-6 lg:px-8 py-3 transition-all">
@@ -72,8 +76,21 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Right actions: Cached Username & Settings + Leave Note Button */}
+        {/* Right actions: Install App (auto-hidden once installed) + Cached Username & Settings + Leave Note Button */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Direct PWA Install Button — removed automatically once app is installed */}
+          {!isAppInstalled && onInstallApp && (
+            <button
+              type="button"
+              onClick={onInstallApp}
+              title="Install Tala App to your device"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/40 text-emerald-300 hover:text-emerald-200 text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="hidden xs:inline">Install</span>
+            </button>
+          )}
+
           {/* Mobile GPS Button */}
           <button
             onClick={onRequestGeoLocation}
