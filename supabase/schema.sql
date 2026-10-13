@@ -342,3 +342,38 @@ ON CONFLICT (code) DO NOTHING;
 INSERT INTO public.cities_municipalities (province_id, code, name, latitude, longitude)
 SELECT p.id, 'DVO', 'Davao City', 7.1907, 125.4553 FROM public.provinces p WHERE p.code = 'DAV'
 ON CONFLICT (code) DO NOTHING;
+
+-- ----------------------------------------------------------------------------
+-- 8. EPHEMERAL NOTES (24H EXPIRATION) & SINGLE ACTIVE NOTE REPLACEMENT
+-- ----------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Allow deleting thoughts" ON public.thoughts;
+CREATE POLICY "Allow deleting thoughts" ON public.thoughts FOR DELETE USING (true);
+
+DROP POLICY IF EXISTS "Allow deleting comments" ON public.comments;
+CREATE POLICY "Allow deleting comments" ON public.comments FOR DELETE USING (true);
+
+DROP POLICY IF EXISTS "Allow deleting reactions" ON public.reactions;
+CREATE POLICY "Allow deleting reactions" ON public.reactions FOR DELETE USING (true);
+
+CREATE OR REPLACE FUNCTION public.handle_new_thought_and_ephemeral_cleanup()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Automatically delete previous thoughts from the same author alias
+    DELETE FROM public.thoughts
+    WHERE author_alias_id = NEW.author_alias_id
+      AND id != NEW.id;
+
+    -- Automatically purge expired thoughts older than 24 hours
+    DELETE FROM public.thoughts
+    WHERE created_at < NOW() - INTERVAL '24 hours';
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_new_thought_ephemeral_cleanup ON public.thoughts;
+CREATE TRIGGER trigger_new_thought_ephemeral_cleanup
+AFTER INSERT ON public.thoughts
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_new_thought_and_ephemeral_cleanup();
+

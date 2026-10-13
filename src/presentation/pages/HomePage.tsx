@@ -358,7 +358,12 @@ export const HomePage: React.FC = () => {
 
       // Fetch unfiltered feed to also track all notes belonging to current user across locations
       const allData = await getFeedUseCase.execute({});
-      setAllThoughtsForUser(allData);
+      const now = Date.now();
+      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+      const unexpiredAll = allData.filter(
+        (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
+      );
+      setAllThoughtsForUser(unexpiredAll);
 
       const feedData = await getFeedUseCase.execute({
         locationId: viewOnlyMyNotes ? undefined : selectedLocation?.id,
@@ -366,7 +371,9 @@ export const HomePage: React.FC = () => {
         searchQuery,
       });
 
-      let filtered = [...feedData];
+      let filtered = feedData.filter(
+        (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
+      );
       if (viewOnlyMyNotes) {
         filtered = filtered.filter(
           (t) =>
@@ -395,20 +402,36 @@ export const HomePage: React.FC = () => {
     loadFeed();
   }, [selectedLocation, selectedCategory, searchQuery, sortBy, viewOnlyMyNotes, currentAlias]);
 
-  // All notes posted by the current cached user
+  // All notes posted by the current cached user (only unexpired active notes)
   const myNotes = useMemo(() => {
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
     return allThoughtsForUser.filter(
       (t) =>
-        t.authorAlias.displayName.toLowerCase() === currentAlias.displayName.toLowerCase() ||
-        t.authorAlias.id === currentAlias.id
+        now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS &&
+        (t.authorAlias.displayName.toLowerCase() === currentAlias.displayName.toLowerCase() ||
+          t.authorAlias.id === currentAlias.id)
     );
   }, [allThoughtsForUser, currentAlias]);
 
-  // Combined thoughts across the entire Philippines so ALL notes display on the map with lollipop icons, even outside the current radius
+  // Combined thoughts across the entire Philippines so ALL notes display on the map with lollipop icons (only unexpired notes)
   const allMapThoughts = useMemo(() => {
     const map = new Map<string, Thought>();
-    allThoughtsForUser.forEach((t) => map.set(t.id, t));
-    thoughts.forEach((t) => map.set(t.id, t));
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+    allThoughtsForUser.forEach((t) => {
+      if (now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS) {
+        map.set(t.id, t);
+      }
+    });
+
+    thoughts.forEach((t) => {
+      if (now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS) {
+        map.set(t.id, t);
+      }
+    });
+
     return Array.from(map.values());
   }, [allThoughtsForUser, thoughts]);
 
@@ -483,13 +506,27 @@ export const HomePage: React.FC = () => {
       isEnvironmentalAlert: params.isEnvironmentalAlert || Boolean(aiAnalysis.environmentalCategory),
     });
 
-    // Immediately add to all thoughts lists so it appears on the map right away, even if far away
-    setAllThoughtsForUser((prev) => [createdThought, ...prev.filter((t) => t.id !== createdThought.id)]);
-    setThoughts((prev) => [createdThought, ...prev.filter((t) => t.id !== createdThought.id)]);
+    // Remove any previous note(s) from this author so only the newest active note remains
+    setAllThoughtsForUser((prev) => [
+      createdThought,
+      ...prev.filter(
+        (t) =>
+          t.authorAlias.displayName.toLowerCase() !== currentAlias.displayName.toLowerCase() &&
+          t.authorAlias.id !== currentAlias.id
+      ),
+    ]);
+    setThoughts((prev) => [
+      createdThought,
+      ...prev.filter(
+        (t) =>
+          t.authorAlias.displayName.toLowerCase() !== currentAlias.displayName.toLowerCase() &&
+          t.authorAlias.id !== currentAlias.id
+      ),
+    ]);
     setSelectedLocation(persistedLocation);
     setHighlightedThoughtId(createdThought.id);
     setLocationBannerMsg(
-      `Note dropped! Lollipop pin & note bubble popped up on the map in ${persistedLocation.cityMunicipality}, ${persistedLocation.province}`
+      `New note dropped! Your previous note was replaced and the new one is pinned on the map (expires in 24h).`
     );
     await loadFeed();
   };

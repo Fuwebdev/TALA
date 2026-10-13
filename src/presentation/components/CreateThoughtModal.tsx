@@ -322,7 +322,7 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
             <div>
               <h2 className="text-sm sm:text-base font-bold text-white">Leave a Note Where You Are</h2>
               <p className="text-[10px] sm:text-[11px] text-slate-400">
-                Posting anonymously as <strong className="text-teal-400">{currentAlias?.displayName || 'Anonymous'}</strong>
+                Posting as <strong className="text-teal-400">{currentAlias?.displayName || 'Anonymous'}</strong> • Replaces previous note • Expires in 24h
               </p>
             </div>
           </div>

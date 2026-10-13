@@ -75,7 +75,13 @@ export class MockThoughtRepository implements IThoughtRepository {
   private savedThoughtIds: Set<string> = new Set();
 
   async getFeed(filter?: GetFeedFilter): Promise<Thought[]> {
-    let result = [...this.thoughts];
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
+    // Filter out expired notes older than 24 hours
+    let result = this.thoughts.filter(
+      (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
+    );
 
     if (filter?.category && filter.category !== 'All') {
       result = result.filter(t => t.category === filter.category);
@@ -99,6 +105,22 @@ export class MockThoughtRepository implements IThoughtRepository {
   }
 
   async createThought(params: Omit<Thought, 'id' | 'createdAtISO' | 'reactions' | 'commentCount'>): Promise<Thought> {
+    // Automatically delete old thoughts and comments from the same author so only latest note is kept
+    const oldThoughts = this.thoughts.filter(
+      (t) =>
+        t.authorAlias.displayName.toLowerCase() === params.authorAlias.displayName.toLowerCase() ||
+        t.authorAlias.id === params.authorAlias.id
+    );
+    for (const old of oldThoughts) {
+      delete this.comments[old.id];
+      this.savedThoughtIds.delete(old.id);
+    }
+    this.thoughts = this.thoughts.filter(
+      (t) =>
+        t.authorAlias.displayName.toLowerCase() !== params.authorAlias.displayName.toLowerCase() &&
+        t.authorAlias.id !== params.authorAlias.id
+    );
+
     const newThought: Thought = {
       ...params,
       id: `thought-${Date.now()}`,

@@ -57,6 +57,16 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
+  const getRemainingHours = (isoString: string) => {
+    const expiresAt = new Date(isoString).getTime() + 24 * 60 * 60 * 1000;
+    const diffMs = expiresAt - Date.now();
+    if (diffMs <= 0) return 'Expired';
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    if (hours > 0) return `${hours}h left`;
+    const mins = Math.max(1, Math.floor(diffMs / (1000 * 60)));
+    return `${mins}m left`;
+  };
+
   return (
     <article className={`relative p-4 sm:p-5 rounded-2xl border transition-all duration-200 hover:border-slate-700/80 ${
       thought.isEnvironmentalAlert
@@ -86,6 +96,9 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
                   {thought.authorAlias.badge}
                 </span>
               )}
+              <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.2 rounded-full bg-slate-800/90 text-teal-300 border border-slate-700 font-medium shrink-0" title="Expires in 24 hours">
+                🕒 {getRemainingHours(thought.createdAtISO)}
+              </span>
             </div>
 
             {/* Time ago & Location */}

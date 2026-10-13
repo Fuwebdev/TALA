@@ -85,6 +85,15 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
 
   async getFeed(filter?: GetFeedFilter): Promise<Thought[]> {
     try {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      // Opportunistically purge expired thoughts older than 24 hours in Supabase
+      supabase
+        .from('thoughts')
+        .delete()
+        .lt('created_at', twentyFourHoursAgo)
+        .then(() => {}, () => {});
+
       let query = supabase
         .from('thoughts')
         .select(`
@@ -119,6 +128,7 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
           )
         `)
         .eq('status', 'published')
+        .gte('created_at', twentyFourHoursAgo)
         .order('created_at', { ascending: false });
 
       if (filter?.category && filter.category !== 'All') {
@@ -140,43 +150,48 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
         return this.fallbackMock.getFeed(filter);
       }
 
-      let mapped: Thought[] = data.map((item: any) => {
-        const dbReactions = Array.isArray(item.reactions) ? item.reactions : [];
-        const dbHeart = dbReactions.filter((r: any) => r.type === 'heart').length;
-        const dbRelate = dbReactions.filter((r: any) => r.type === 'relate').length;
-        const dbSupport = dbReactions.filter((r: any) => r.type === 'support').length;
-        const localBonus = this.getLocalReactionBonus(item.id);
+      const now = Date.now();
+      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
-        return {
-          id: item.id,
-          authorAlias: {
-            id: item.author_alias?.id || 'anon',
-            displayName: item.author_alias?.display_name || 'AnonymousStudent',
-            avatarSeed: item.author_alias?.avatar_seed || 'Anon',
-            badge: item.author_alias?.badge,
-          },
-          category: item.category,
-          body: item.body,
-          location: {
-            id: item.location?.id || 'loc-1',
-            region: item.location?.province?.region?.name || 'Philippines',
-            province: item.location?.province?.name || 'Local Province',
-            cityMunicipality: item.location?.name || 'Local City',
-            coordinates: {
-              lat: Number(item.location?.latitude || 14.6760),
-              lng: Number(item.location?.longitude || 121.0437),
+      let mapped: Thought[] = data
+        .filter((item: any) => now - new Date(item.created_at).getTime() <= TWENTY_FOUR_HOURS_MS)
+        .map((item: any) => {
+          const dbReactions = Array.isArray(item.reactions) ? item.reactions : [];
+          const dbHeart = dbReactions.filter((r: any) => r.type === 'heart').length;
+          const dbRelate = dbReactions.filter((r: any) => r.type === 'relate').length;
+          const dbSupport = dbReactions.filter((r: any) => r.type === 'support').length;
+          const localBonus = this.getLocalReactionBonus(item.id);
+
+          return {
+            id: item.id,
+            authorAlias: {
+              id: item.author_alias?.id || 'anon',
+              displayName: item.author_alias?.display_name || 'AnonymousStudent',
+              avatarSeed: item.author_alias?.avatar_seed || 'Anon',
+              badge: item.author_alias?.badge,
             },
-          },
-          createdAtISO: item.created_at,
-          reactions: {
-            heart: dbHeart + localBonus.heart,
-            relate: dbRelate + localBonus.relate,
-            support: dbSupport + localBonus.support,
-          },
-          commentCount: Array.isArray(item.comments) ? item.comments.length : 0,
-          isEnvironmentalAlert: item.is_environmental_alert,
-        };
-      });
+            category: item.category,
+            body: item.body,
+            location: {
+              id: item.location?.id || 'loc-1',
+              region: item.location?.province?.region?.name || 'Philippines',
+              province: item.location?.province?.name || 'Local Province',
+              cityMunicipality: item.location?.name || 'Local City',
+              coordinates: {
+                lat: Number(item.location?.latitude || 14.6760),
+                lng: Number(item.location?.longitude || 121.0437),
+              },
+            },
+            createdAtISO: item.created_at,
+            reactions: {
+              heart: dbHeart + localBonus.heart,
+              relate: dbRelate + localBonus.relate,
+              support: dbSupport + localBonus.support,
+            },
+            commentCount: Array.isArray(item.comments) ? item.comments.length : 0,
+            isEnvironmentalAlert: item.is_environmental_alert,
+          };
+        });
 
       if (filter?.searchQuery) {
         const q = filter.searchQuery.toLowerCase();
@@ -198,6 +213,30 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
   async createThought(params: Omit<Thought, 'id' | 'createdAtISO' | 'reactions' | 'commentCount'>): Promise<Thought> {
     try {
       const persistedAliasId = await this.ensureAliasPersisted(params.authorAlias);
+
+      // Automatically delete any old note(s) from this author in Supabase along with comments and reactions
+      try {
+        const { data: oldThoughts } = await supabase
+          .from('thoughts')
+          .select('id')
+          .eq('author_alias_id', persistedAliasId);
+
+        if (oldThoughts && oldThoughts.length > 0) {
+          const oldIds = oldThoughts.map((t: any) => t.id);
+          // Delete cascade data (reactions, comments, saved thoughts, reports)
+          await supabase.from('reactions').delete().in('thought_id', oldIds);
+          await supabase.from('comments').delete().in('thought_id', oldIds);
+          await supabase.from('saved_thoughts').delete().in('thought_id', oldIds);
+          await supabase.from('reports').delete().eq('target_type', 'thought').in('target_id', oldIds);
+          // Delete old thoughts from database
+          await supabase.from('thoughts').delete().in('id', oldIds);
+        }
+      } catch (cleanErr) {
+        console.warn('[Supabase] Old thoughts cleanup notice:', cleanErr);
+      }
+
+      // Also clean up in fallback mock repository
+      await this.fallbackMock.createThought(params);
 
       const { data, error } = await supabase
         .from('thoughts')

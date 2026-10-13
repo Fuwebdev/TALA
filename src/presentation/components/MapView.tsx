@@ -106,6 +106,12 @@ export const MapView: React.FC<MapViewProps> = ({
       const safeCategory = escapeHtml(thought.category);
       const previewBody = safeBody.length > 55 ? safeBody.slice(0, 55) + '...' : safeBody;
 
+      const expiresAt = new Date(thought.createdAtISO).getTime() + 24 * 60 * 60 * 1000;
+      const diffMs = expiresAt - Date.now();
+      const hoursLeft = Math.floor(diffMs / (1000 * 60 * 60));
+      const minsLeft = Math.max(1, Math.floor(diffMs / (1000 * 60)));
+      const remainingLabel = diffMs <= 0 ? 'Expired' : hoursLeft > 0 ? `${hoursLeft}h` : `${minsLeft}m`;
+
       const el = document.createElement('div');
       el.className = `${isHighlighted ? 'z-50' : 'z-20'} cursor-pointer group`;
 
@@ -132,7 +138,7 @@ export const MapView: React.FC<MapViewProps> = ({
             </div>
             <p class="text-[11px] text-white font-medium leading-snug break-words">"${previewBody}"</p>
             <div class="flex items-center justify-between text-[9px] text-slate-400 pt-0.5">
-              <span class="truncate">📍 ${safeCity}</span>
+              <span class="truncate">📍 ${safeCity} • 🕒 ${remainingLabel}</span>
               <span class="shrink-0">❤️ ${thought.reactions.heart} 💬 ${thought.commentCount}</span>
             </div>
           </div>

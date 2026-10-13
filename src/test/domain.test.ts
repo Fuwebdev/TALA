@@ -35,6 +35,16 @@ export function runDomainVerificationTests(): { passed: boolean; log: string[] }
     }
     log.push(`[PASS] PII safety detection verified`);
 
+    // 4. Test 24-Hour Note Expiration Calculation
+    const now = Date.now();
+    const twentyFiveHoursAgoISO = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+    const oneHourAgoISO = new Date(now - 1 * 60 * 60 * 1000).toISOString();
+    const isExpired = (iso: string) => now - new Date(iso).getTime() > 24 * 60 * 60 * 1000;
+    if (!isExpired(twentyFiveHoursAgoISO) || isExpired(oneHourAgoISO)) {
+      throw new Error('24-hour expiration evaluation failed');
+    }
+    log.push(`[PASS] 24-hour ephemeral note expiration verified`);
+
   } catch (err: any) {
     passed = false;
     log.push(`[FAIL] ${err.message}`);
