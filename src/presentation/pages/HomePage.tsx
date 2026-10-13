@@ -9,6 +9,7 @@ import { FeedFilter } from '../components/FeedFilter';
 import { CommentsDrawer } from '../components/CommentsDrawer';
 import { ReportModal } from '../components/ReportModal';
 import { UserSettingsModal } from '../components/UserSettingsModal';
+import { PwaInstallGateModal } from '../components/PwaInstallGateModal';
 
 import { createAnonymousAlias, getCachedAlias, saveCachedAlias, Alias } from '../../domain/entities/Alias';
 import { Location } from '../../domain/entities/Location';
@@ -52,6 +53,21 @@ export const HomePage: React.FC = () => {
   const addCommentUseCase = useMemo(() => new AddCommentUseCase(thoughtRepo), [thoughtRepo]);
   const reportContentUseCase = useMemo(() => new ReportContentUseCase(thoughtRepo), [thoughtRepo]);
   const toggleSaveThoughtUseCase = useMemo(() => new ToggleSaveThoughtUseCase(thoughtRepo), [thoughtRepo]);
+
+  // Direct PWA Install Gate State (Show install prompt first before username/location onboarding)
+  const [showPwaInstallGate, setShowPwaInstallGate] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+    let alreadyInstalled = false;
+    try {
+      alreadyInstalled = localStorage.getItem('tala_pwa_installed_v1') === 'true';
+    } catch {
+      // Ignore
+    }
+    return !isStandalone && !alreadyInstalled;
+  });
 
   // Cached Username & First-Time Install Onboarding State
   const [currentAlias, setCurrentAlias] = useState<Alias>(() => {
@@ -580,8 +596,16 @@ export const HomePage: React.FC = () => {
       </main>
 
       {/* Modals & Drawers */}
+      {showPwaInstallGate && (
+        <PwaInstallGateModal
+          onInstalledOrContinue={() => {
+            setShowPwaInstallGate(false);
+          }}
+        />
+      )}
+
       <UserSettingsModal
-        isOpen={isSettingsModalOpen}
+        isOpen={isSettingsModalOpen && !showPwaInstallGate}
         isFirstTimeOnboarding={isFirstTimeUser}
         onClose={() => {
           setIsFirstTimeUser(false);

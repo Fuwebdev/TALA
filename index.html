@@ -7,19 +7,19 @@
     <meta name="description" content="Tala — Anonymous, location-based notes and thoughts platform for the Philippines. Leave a note where you are." />
 
     <!-- Search Engine & Browser Favicons (rel="icon") -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="icon" type="image/png" sizes="48x48" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="icon" type="image/png" sizes="96x96" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="shortcut icon" type="image/png" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+    <link rel="shortcut icon" type="image/png" href="/icon-192.png" />
 
     <!-- iOS Home Screen App Icons & Web App Capabilities -->
-    <link rel="apple-touch-icon" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="apple-touch-icon" sizes="120x120" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="apple-touch-icon" sizes="167x167" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Tala" />
@@ -33,9 +33,9 @@
     <!-- Search Engine / Open Graph / Social Sharing Icon -->
     <meta property="og:title" content="Tala — Leave a thought where you are" />
     <meta property="og:description" content="Anonymous, location-based notes and thoughts platform for the Philippines." />
-    <meta property="og:image" content="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
+    <meta property="og:image" content="https://tala-z2kn.vercel.app/icon-512.png" />
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:image" content="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png" />
+    <meta name="twitter:image" content="https://tala-z2kn.vercel.app/icon-512.png" />
 
     <!-- Geometric Monolithic Webfont for Mobile Preview & Cross-Device Consistency -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -45,6 +45,50 @@
     <link href="https://fonts.cdnfonts.com/css/century-gothic-paneuropean" rel="stylesheet" />
 
     <link href="https://unpkg.com/maplibre-gl@5.1.0/dist/maplibre-gl.css" rel="stylesheet" />
+
+    <!-- Early Chrome Redirect & Direct PWA Install Capture Script -->
+    <script>
+      (function () {
+        window.__deferredPwaPrompt = null;
+
+        // 1. Capture Chrome's native beforeinstallprompt immediately before React mounts
+        window.addEventListener('beforeinstallprompt', function (e) {
+          e.preventDefault();
+          window.__deferredPwaPrompt = e;
+          window.dispatchEvent(new CustomEvent('tala-pwa-ready', { detail: e }));
+        });
+
+        window.addEventListener('appinstalled', function () {
+          window.__deferredPwaPrompt = null;
+          try {
+            localStorage.setItem('tala_pwa_installed_v1', 'true');
+          } catch (err) {}
+          window.dispatchEvent(new CustomEvent('tala-pwa-installed'));
+        });
+
+        // 2. Register Service Worker as early as possible so Chrome marks the PWA installable
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js').catch(function () {});
+        }
+
+        // 3. Auto-redirect in-app browsers (Messenger, Facebook, Instagram, TikTok, etc.) on Android directly to Google Chrome
+        var ua = navigator.userAgent || '';
+        var isAndroid = /Android/i.test(ua);
+        var isInAppWebView = /(FBAN|FBAV|Messenger|Instagram|BytedanceWebview|TikTok|Line|MicroMessenger|Twitter|Snapchat|wv)/i.test(ua);
+        var isStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+
+        if (isAndroid && isInAppWebView && !isStandalone && !sessionStorage.getItem('tala_chrome_intent_fired')) {
+          try {
+            sessionStorage.setItem('tala_chrome_intent_fired', '1');
+            var hostAndPath = window.location.host + window.location.pathname + window.location.search;
+            var fallback = encodeURIComponent(window.location.href);
+            window.location.replace(
+              'intent://' + hostAndPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + fallback + ';end'
+            );
+          } catch (err) {}
+        }
+      })();
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-sky-500 selection:text-white min-h-screen">
     <div id="root"></div>
