@@ -619,10 +619,11 @@ export const HomePage: React.FC = () => {
       unexpiredAll = unexpiredAll.filter((t) => !isAuthorBlocked(t.authorAlias));
       setAllThoughtsForUser(unexpiredAll);
 
-      // When a user selects any category (All, Thoughts, School, Life, Community, Environment),
-      // display all community notes across Philippine locations matching that category.
+      // Load notes across all Philippine locations (even in different locations)
+      // When viewOnlyMyNotes is true, it displays current user's notes across all locations.
+      // When browsing the community feed, display all notes across the Philippines (Supabase + mock).
       const feedData = await getFeedUseCase.execute({
-        locationId: viewOnlyMyNotes ? undefined : (selectedCategory === 'All' ? selectedLocation?.id : undefined),
+        locationId: undefined,
         category: selectedCategory,
         searchQuery,
       });
@@ -980,9 +981,7 @@ export const HomePage: React.FC = () => {
                   ? `Showing notes posted by ${currentAlias.displayName}`
                   : selectedCategory !== 'All'
                   ? `Showing ${selectedCategory} notes across all Philippine locations`
-                  : selectedLocation
-                  ? `Notes left in ${selectedLocation.cityMunicipality}, ${selectedLocation.province}`
-                  : 'Showing notes across all Philippine regions'}
+                  : 'Showing all notes across Philippine locations'}
               </p>
             </div>
 

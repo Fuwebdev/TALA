@@ -203,7 +203,20 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
         );
       }
 
-      return mapped;
+      // Get mock thoughts to merge with Supabase data so both live Supabase notes
+      // and demo notes across different Philippine locations display simultaneously
+      const mockNotes = await this.fallbackMock.getFeed(filter);
+      const combined = [...mapped, ...mockNotes];
+      const seenIds = new Set<string>();
+      const deduplicated = combined.filter((t) => {
+        if (seenIds.has(t.id)) return false;
+        seenIds.add(t.id);
+        return true;
+      });
+
+      return deduplicated.sort(
+        (a, b) => new Date(b.createdAtISO).getTime() - new Date(a.createdAtISO).getTime()
+      );
     } catch (err) {
       console.error('[Supabase] getFeed exception:', err);
       return this.fallbackMock.getFeed(filter);
