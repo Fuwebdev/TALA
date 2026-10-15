@@ -2,7 +2,6 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Header } from '../components/Header';
 import { ThoughtCard } from '../components/ThoughtCard';
 import { WeatherCard } from '../components/WeatherCard';
-import { HierarchicalLocationSelector } from '../components/HierarchicalLocationSelector';
 import { CreateThoughtModal } from '../components/CreateThoughtModal';
 import { MapView } from '../components/MapView';
 import { FeedFilter } from '../components/FeedFilter';
@@ -25,7 +24,7 @@ import { ReportReason } from '../../domain/entities/Report';
 import { SupabaseThoughtRepository } from '../../infrastructure/repositories/SupabaseThoughtRepository';
 import { SupabaseLocationRepository } from '../../infrastructure/repositories/SupabaseLocationRepository';
 import { OpenWeatherGateway } from '../../infrastructure/weather/OpenWeatherGateway';
-import { ensureAnonymousAuthSession } from '../../infrastructure/supabase/client';
+import { ensureAnonymousAuthSession, supabase } from '../../infrastructure/supabase/client';
 import { AIModerationGateway } from '../../infrastructure/ai/AIModerationGateway';
 import { GeolocationService } from '../../application/services/GeolocationService';
 import { runDomainVerificationTests } from '../../test/domain.test';
@@ -102,6 +101,12 @@ export const HomePage: React.FC = () => {
   });
   const [isFirstTimeUser, setIsFirstTimeUser] = useState<boolean>(() => !getCachedAlias());
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(() => !getCachedAlias());
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'profile' | 'themes' | 'mynotes' | 'blocked' | 'reports'>('profile');
+
+  const handleOpenSettingsModal = (tab: 'profile' | 'themes' | 'mynotes' | 'blocked' | 'reports' = 'profile') => {
+    setSettingsInitialTab(tab);
+    setIsSettingsModalOpen(true);
+  };
 
   // Feed Mode: All Community Notes vs My Notes
   const [viewOnlyMyNotes, setViewOnlyMyNotes] = useState<boolean>(false);
@@ -129,6 +134,22 @@ export const HomePage: React.FC = () => {
     }
     return null;
   });
+
+  // User's Verified GPS Location (Strictly kept independent from browsed note locations)
+  const [userActualLocation, setUserActualLocation] = useState<Location | null>(() => {
+    try {
+      const savedLoc = localStorage.getItem('tala_cached_user_location_v1');
+      if (savedLoc) {
+        return JSON.parse(savedLoc) as Location;
+      }
+    } catch {
+      // Ignore storage error
+    }
+    return null;
+  });
+
+  // Full Screen Map View state for mobile and desktop
+  const [isMapFullScreen, setIsMapFullScreen] = useState<boolean>(false);
 
   // Live User Geolocation State & 5km Nearby Locations (Cached across refreshes)
   const [userGpsCoords, setUserGpsCoords] = useState<{ lat: number; lng: number } | null>(() => {
@@ -255,14 +276,21 @@ export const HomePage: React.FC = () => {
     await ReportHistoryService.recordSubmittedReport(currentAlias.id, reportItem);
     setUserReports((prev) => [reportItem, ...prev]);
 
-    // If violation is confirmed, automatically quarantine that note or comment from current user's feed
+    // If violation is confirmed, automatically quarantine that note or comment and ban author
     if (reportData.resolution.decision === 'VIOLATION_CONFIRMED') {
       if (reportData.targetType === 'thought') {
         setThoughts((prev) => prev.filter((t) => t.id !== reportData.targetId));
         setAllThoughtsForUser((prev) => prev.filter((t) => t.id !== reportData.targetId));
+        supabase.from('thoughts').update({ status: 'removed' }).eq('id', reportData.targetId).then(() => {}, () => {});
       } else if (reportData.targetType === 'comment') {
         setComments((prev) => prev.filter((c) => c.id !== reportData.targetId));
+        supabase.from('comments').update({ status: 'removed' }).eq('id', reportData.targetId).then(() => {}, () => {});
       }
+
+      if (reportData.reportedAuthorName && reportData.reportedAuthorName !== 'Anonymous') {
+        handleBlockUser('', reportData.reportedAuthorName);
+      }
+      setLocationBannerMsg(`AI Moderation Action: Violated content removed and 24h ban issued to author.`);
     }
   };
 
@@ -336,6 +364,7 @@ export const HomePage: React.FC = () => {
   ): Promise<Location> => {
     const persisted = await locationRepo.ensureLocationPersisted(exactLoc);
     setUserGpsCoords(coords);
+    setUserActualLocation(persisted);
     setLastLocationError(null);
 
     const resolvedNearby =
@@ -372,6 +401,7 @@ export const HomePage: React.FC = () => {
     setIsLocating(true);
     setLocationBannerMsg(null);
     setLastLocationError(null);
+    setHighlightedThoughtId(null);
     try {
       const result = await GeolocationService.detectUserLocation();
       const persistedLoc = await registerExactLocation(
@@ -505,10 +535,51 @@ export const HomePage: React.FC = () => {
     });
   }, [locationRepo]);
 
-  // Save validated username to localStorage cache
+  // Save validated username to localStorage cache and update author info across active notes
   const handleSaveUsername = (updatedAlias: Alias) => {
+    const oldName = currentAlias.displayName;
+    const oldId = currentAlias.id;
     saveCachedAlias(updatedAlias);
     setCurrentAlias(updatedAlias);
+
+    // Update in-memory user notes immediately so author name updates live across feed & map
+    setAllThoughtsForUser((prev) =>
+      prev.map((t) => {
+        if (
+          t.authorAlias.id === oldId ||
+          t.authorAlias.displayName.toLowerCase() === oldName.toLowerCase()
+        ) {
+          return {
+            ...t,
+            authorAlias: {
+              ...t.authorAlias,
+              displayName: updatedAlias.displayName,
+              avatarSeed: updatedAlias.avatarSeed,
+            },
+          };
+        }
+        return t;
+      })
+    );
+
+    setThoughts((prev) =>
+      prev.map((t) => {
+        if (
+          t.authorAlias.id === oldId ||
+          t.authorAlias.displayName.toLowerCase() === oldName.toLowerCase()
+        ) {
+          return {
+            ...t,
+            authorAlias: {
+              ...t.authorAlias,
+              displayName: updatedAlias.displayName,
+              avatarSeed: updatedAlias.avatarSeed,
+            },
+          };
+        }
+        return t;
+      })
+    );
   };
 
   // Sync blocked IDs from repository on alias change
@@ -791,23 +862,53 @@ export const HomePage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+    <div
+      className="min-h-screen flex flex-col transition-colors duration-300"
+      style={{ backgroundColor: 'var(--theme-ambient-bg)', color: 'var(--theme-font-color)' }}
+    >
       
       {/* Top Header Navigation */}
       <Header
         currentAlias={currentAlias}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
-        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        onOpenSettingsModal={handleOpenSettingsModal}
         onRequestGeoLocation={handleAllowUserLocation}
         isLocating={isLocating}
-        selectedCityName={selectedLocation?.cityMunicipality}
+        selectedCityName={userActualLocation?.cityMunicipality || selectedLocation?.cityMunicipality}
         isAppInstalled={isAppInstalled}
         onInstallApp={handleTriggerInstall}
+        onToggleMapFullScreen={() => setIsMapFullScreen(true)}
       />
 
       {/* Main Content Layout */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
         
+        {/* Mobile View Switcher: Feed vs Full Screen Map */}
+        <div className="lg:hidden col-span-1 flex items-center p-1 bg-slate-900/90 rounded-2xl border border-slate-800 text-xs font-semibold shadow-lg">
+          <button
+            onClick={() => setIsMapFullScreen(false)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl transition-all ${
+              !isMapFullScreen
+                ? 'bg-sky-500 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Compass className="w-4 h-4" />
+            <span>Notes Feed ({thoughts.length})</span>
+          </button>
+          <button
+            onClick={() => setIsMapFullScreen(true)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl transition-all ${
+              isMapFullScreen
+                ? 'bg-teal-500 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MapPin className="w-4 h-4" />
+            <span>🗺️ Full Screen Map ({allMapThoughts.length})</span>
+          </button>
+        </div>
+
         {/* Left Column: Location Prompt, Feed Controls & Notes (7 cols) */}
         <section className="lg:col-span-7 space-y-5">
           
@@ -819,12 +920,20 @@ export const HomePage: React.FC = () => {
                   <MapPin className="w-4 h-4 text-sky-400 shrink-0" />
                   <h3 className="text-sm font-bold text-white">
                     {selectedLocation
-                      ? `You are viewing ${selectedLocation.cityMunicipality}, ${selectedLocation.province}`
+                      ? `Viewing Community Feed: ${selectedLocation.cityMunicipality}, ${selectedLocation.province}`
                       : 'Discover & Leave Notes Where You Are'}
                   </h3>
                 </div>
                 <p className="text-xs text-slate-300">
-                  Signed in as <strong className="text-teal-400">{currentAlias.displayName}</strong>. Allow your location to detect your exact area and leave a note.
+                  {userActualLocation ? (
+                    <span>
+                      📍 Your GPS Location: <strong className="text-teal-400">{userActualLocation.cityMunicipality}, {userActualLocation.province}</strong>. Notes you add are pinned to your exact GPS coordinates.
+                    </span>
+                  ) : (
+                    <span>
+                      Signed in as <strong className="text-teal-400">{currentAlias.displayName}</strong>. Allow your GPS location to drop notes where you are.
+                    </span>
+                  )}
                 </p>
               </div>
 
@@ -1018,19 +1127,14 @@ export const HomePage: React.FC = () => {
               }}
               onRequestGeoLocation={handleAllowUserLocation}
               isLocating={isLocating}
+              isFullScreen={isMapFullScreen}
+              onToggleFullScreen={() => setIsMapFullScreen((prev) => !prev)}
+              onOpenCreateModal={() => setIsCreateModalOpen(true)}
             />
           </div>
 
           {/* Weather Integration */}
           <WeatherCard weather={weather} loading={loadingWeather} />
-
-          {/* Hierarchical Location Selector */}
-          <HierarchicalLocationSelector
-            locations={locations}
-            selectedLocationId={selectedLocation?.id}
-            onSelectLocation={(loc) => setSelectedLocation(loc)}
-          />
-
         </aside>
 
       </main>
@@ -1050,6 +1154,7 @@ export const HomePage: React.FC = () => {
       <UserSettingsModal
         isOpen={isSettingsModalOpen && !showPwaInstallGate}
         isFirstTimeOnboarding={isFirstTimeUser}
+        initialTab={settingsInitialTab}
         onClose={() => {
           setIsFirstTimeUser(false);
           setIsSettingsModalOpen(false);
@@ -1066,7 +1171,7 @@ export const HomePage: React.FC = () => {
         availableLocations={locations}
         lastLocationError={lastLocationError}
         isLocating={isLocating}
-        detectedLocation={selectedLocation}
+        detectedLocation={userActualLocation || selectedLocation}
         hasGpsCoords={Boolean(userGpsCoords)}
         onSelectNote={(thought) => {
           setSelectedLocation(thought.location);
@@ -1083,9 +1188,11 @@ export const HomePage: React.FC = () => {
         currentAlias={currentAlias}
         locations={locations}
         selectedLocation={selectedLocation || locations[0] || null}
+        userActualLocation={userActualLocation}
         userGpsCoords={userGpsCoords}
         nearbyLocations={nearby5kmLocations}
         onExactLocationDetected={registerExactLocation}
+        onRequestGpsLocation={handleAllowUserLocation}
         onSubmit={handleCreateThought}
       />
 
@@ -1129,10 +1236,28 @@ export const HomePage: React.FC = () => {
       />
 
       {/* Footer */}
-      <footer className="mt-12 py-6 border-t border-slate-900 bg-slate-950 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <span>Tala — Anonymous Location Notes for the Philippines</span>
-          <span>Leave a note where you are. 🇵🇭</span>
+      <footer
+        className="mt-12 py-6 border-t border-slate-900/80 text-center text-xs transition-colors duration-300"
+        style={{ backgroundColor: 'var(--theme-ambient-bg)', color: 'var(--theme-font-muted)' }}
+      >
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/app-icon/TALA%20Starry%20Landscape%20App%20Icon.png"
+              alt="Tala App Icon"
+              className="w-6 h-6 rounded-xl object-cover shadow-sm ring-1 ring-white/10"
+            />
+            <span className="font-semibold text-white/90">
+              Tala — Anonymous Location Notes
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] font-medium text-slate-200 shadow-sm">
+              <span className="text-sm">🇵🇭</span>
+              <span>Philippines</span>
+            </span>
+            <span className="text-[11px] text-slate-400">Leave a note where you are</span>
+          </div>
         </div>
       </footer>
 

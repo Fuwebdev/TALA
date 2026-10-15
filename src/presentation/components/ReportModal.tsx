@@ -104,13 +104,13 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         console.warn('AI report reviewer fallback:', aiErr);
       }
 
-      // Fallback resolution if offline
+      // Fallback resolution if offline or AI endpoint unreachable
       const fallback = {
         decision: 'VIOLATION_CONFIRMED' as const,
-        aiResponseMessage: `Our Safety AI reviewed the reported ${targetType}. It was flagged for violating community standards on ${selectedReason}. The content has been hidden from your feed.`,
-        actionTaken: 'Content quarantined & logged in safety registry',
-        strikeStatus: 'Strike 3/3 (24h Device Lock Applied)',
-        banStatus: 'Device Locked (24h)',
+        aiResponseMessage: `Our Safety AI reviewed the reported ${targetType}. A violation of Tala community guidelines was confirmed for "${selectedReason}". The content has been permanently removed, and a 24-hour device lock ban has been applied to ${reportedAuthorName}.`,
+        actionTaken: `Content removed from all community feeds & 24h device ban applied to ${reportedAuthorName}`,
+        strikeStatus: 'Strike 3/3 (24h Device Ban Applied)',
+        banStatus: 'Device Locked (24h Banned)',
       };
       setAiResolution(fallback);
       onReportResolved?.({

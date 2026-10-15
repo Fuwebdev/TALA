@@ -19,6 +19,8 @@ import {
   Flag,
   Bot,
   AlertTriangle,
+  Palette,
+  Settings,
 } from 'lucide-react';
 import { Alias, createAnonymousAlias, validateUsername } from '../../domain/entities/Alias';
 import { Thought } from '../../domain/entities/Thought';
@@ -27,10 +29,12 @@ import { GeolocationService } from '../../application/services/GeolocationServic
 import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLocationRepository';
 import { ConfirmModal } from './ConfirmModal';
 import { UserSubmittedReport } from '../../application/services/ReportHistoryService';
+import { TALA_THEMES, ThemeService, ThemeId } from '../../application/services/ThemeService';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
   isFirstTimeOnboarding?: boolean;
+  initialTab?: 'profile' | 'themes' | 'mynotes' | 'blocked' | 'reports';
   onClose: () => void;
   currentAlias: Alias;
   userNotes: Thought[];
@@ -56,6 +60,7 @@ interface UserSettingsModalProps {
 export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   isOpen,
   isFirstTimeOnboarding = false,
+  initialTab,
   onClose,
   currentAlias,
   userNotes,
@@ -77,12 +82,36 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   onDeleteReport,
 }) => {
   const [usernameInput, setUsernameInput] = useState(currentAlias.displayName);
-  const [activeTab, setActiveTab] = useState<'profile' | 'mynotes' | 'blocked' | 'reports'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'themes' | 'mynotes' | 'blocked' | 'reports'>(
+    initialTab || 'profile'
+  );
+  const [currentTheme, setCurrentTheme] = useState<ThemeId>(() => ThemeService.getSavedTheme());
   const [onboardingStep, setOnboardingStep] = useState<'username' | 'location'>('username');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, isOpen]);
+
+  useEffect(() => {
+    const handleThemeEvent = (e: any) => {
+      if (e.detail?.themeId) {
+        setCurrentTheme(e.detail.themeId);
+      }
+    };
+    window.addEventListener('tala-theme-change', handleThemeEvent);
+    return () => window.removeEventListener('tala-theme-change', handleThemeEvent);
+  }, []);
+
+  const handleSelectTheme = (themeId: ThemeId) => {
+    ThemeService.applyTheme(themeId);
+    setCurrentTheme(themeId);
+  };
 
   const formatTimeAgo = (isoString: string) => {
     try {
@@ -104,8 +133,12 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const [isSelectingManual, setIsSelectingManual] = useState(false);
 
   useEffect(() => {
-    setUsernameInput(currentAlias.displayName);
-  }, [currentAlias]);
+    if (isOpen) {
+      setUsernameInput(currentAlias.displayName);
+      setValidationError(null);
+      setSavedSuccess(false);
+    }
+  }, [isOpen, currentAlias.displayName]);
 
   useEffect(() => {
     if (isOpen && isFirstTimeOnboarding) {
@@ -255,7 +288,8 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     } else {
       setTimeout(() => {
         setSavedSuccess(false);
-      }, 1200);
+        onClose();
+      }, 700);
     }
   };
 
@@ -327,7 +361,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
               {isFirstTimeOnboarding && onboardingStep === 'location' ? (
                 <Navigation className="w-4 h-4" />
               ) : (
-                <Sparkles className="w-4 h-4" />
+                <Settings className="w-4 h-4" />
               )}
             </div>
             <div>
@@ -378,10 +412,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
 
         {/* Navigation Tabs (Hidden during first-time onboarding) */}
         {!isFirstTimeOnboarding && (
-          <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800 shrink-0">
+          <div className="grid grid-cols-5 gap-1 bg-slate-950 p-1 rounded-2xl border border-slate-800 shrink-0">
             {(
               [
                 { key: 'profile', label: 'Profile', count: null, Icon: UserCheck },
+                { key: 'themes', label: 'Theme', count: null, Icon: Palette },
                 { key: 'mynotes', label: 'Notes', count: userNotes.length, Icon: MessageSquare },
                 { key: 'blocked', label: 'Blocked', count: blockedUserIds.length, Icon: UserX },
                 { key: 'reports', label: 'Reports', count: userReports.length, Icon: Flag },
@@ -608,7 +643,79 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
           </form>
         )}
 
-        {/* Tab 2: View User's Notes */}
+        {/* Tab: Theme Picker (Green, Pink, Brown, Oceanic, Sunset, Purple) */}
+        {activeTab === 'themes' && !isFirstTimeOnboarding && (
+          <div className="flex-1 overflow-y-auto space-y-4 pr-1 max-h-[58vh]">
+            <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 text-left">
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4 text-sky-400" />
+                <span className="text-xs font-bold text-white">Choose Tala Appearance</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Customize your vibe with custom palettes including Forest Green, Sakura Pink, Warm Mocha, and more. Applied instantly across map pins, buttons, badges, and glows.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {TALA_THEMES.map((theme) => {
+                const isSelected = currentTheme === theme.id;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => handleSelectTheme(theme.id)}
+                    className={`relative p-3.5 rounded-2xl text-left border transition-all duration-200 flex flex-col gap-2 ${
+                      isSelected
+                        ? 'bg-slate-800/90 border-sky-400/80 shadow-lg ring-2 ring-sky-400/30'
+                        : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{theme.emoji}</span>
+                        <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                          {theme.name}
+                          {isSelected && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div
+                          className="w-4 h-4 rounded-full border border-white/20 shadow-sm"
+                          style={{
+                            background: `linear-gradient(135deg, ${theme.previewColors[0]}, ${theme.previewColors[1]})`,
+                          }}
+                        />
+                        {isSelected && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      {theme.tagline}
+                    </p>
+
+                    {/* Mini visual swatch indicator */}
+                    <div className="h-1.5 w-full rounded-full overflow-hidden bg-slate-850 flex">
+                      <div
+                        className="h-full w-1/2"
+                        style={{ backgroundColor: theme.previewColors[0] }}
+                      />
+                      <div
+                        className="h-full w-1/2"
+                        style={{ backgroundColor: theme.previewColors[1] }}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Tab: View User's Notes */}
         {activeTab === 'mynotes' && !isFirstTimeOnboarding && (
           <div className="flex-1 overflow-y-auto space-y-3 pr-1 max-h-[55vh]">
             {userNotes.length === 0 ? (

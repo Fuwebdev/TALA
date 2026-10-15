@@ -1,16 +1,17 @@
 import React from 'react';
-import { MapPin, Plus, ShieldCheck, Navigation, Settings, Download } from 'lucide-react';
+import { MapPin, Plus, ShieldCheck, Navigation, Settings, Download, Map, Palette } from 'lucide-react';
 import { Alias } from '../../domain/entities/Alias';
 
 interface HeaderProps {
   currentAlias: Alias;
   onOpenCreateModal: () => void;
-  onOpenSettingsModal: () => void;
+  onOpenSettingsModal: (initialTab?: 'profile' | 'themes' | 'mynotes' | 'blocked' | 'reports') => void;
   onRequestGeoLocation: () => void;
   isLocating?: boolean;
   selectedCityName?: string;
   isAppInstalled?: boolean;
   onInstallApp?: () => void;
+  onToggleMapFullScreen?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -22,9 +23,13 @@ export const Header: React.FC<HeaderProps> = ({
   selectedCityName,
   isAppInstalled = false,
   onInstallApp,
+  onToggleMapFullScreen,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80 px-3 sm:px-6 lg:px-8 py-3 transition-all">
+    <header
+      className="sticky top-0 z-40 backdrop-blur-xl border-b border-slate-800/80 px-3 sm:px-6 lg:px-8 py-3 transition-colors duration-300"
+      style={{ backgroundColor: 'var(--theme-header-bg)' }}
+    >
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
         
         {/* Brand */}
@@ -91,6 +96,17 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
+          {/* Mobile Full Screen Map Button */}
+          {onToggleMapFullScreen && (
+            <button
+              onClick={onToggleMapFullScreen}
+              title="Open full view map"
+              className="md:hidden p-2 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-300 transition-all active:scale-95"
+            >
+              <Map className="w-4 h-4" />
+            </button>
+          )}
+
           {/* Mobile GPS Button */}
           <button
             onClick={onRequestGeoLocation}
@@ -101,9 +117,18 @@ export const Header: React.FC<HeaderProps> = ({
             <Navigation className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`} />
           </button>
 
+          {/* Quick Theme Switcher Button */}
+          <button
+            onClick={() => onOpenSettingsModal('themes')}
+            title="Themes (Green, Pink, Brown, Sunset, Violet...)"
+            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-sky-300 transition-all active:scale-95 shrink-0"
+          >
+            <Palette className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400" />
+          </button>
+
           {/* Cached Username Badge & Settings Trigger */}
           <button
-            onClick={onOpenSettingsModal}
+            onClick={() => onOpenSettingsModal('profile')}
             title="Open User Settings & My Notes"
             className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800/80 border border-slate-800 text-xs font-medium text-slate-300 transition-all"
           >

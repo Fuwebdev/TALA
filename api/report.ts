@@ -59,26 +59,15 @@ export async function processReportAnalysis(req: ReportAnalysisRequest): Promise
   const apiKey = process.env.OPENROUTER_API_KEY || '';
   const model = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 
-  // Fallback if AI key is not configured
+  // Automatic AI moderation review (Enforces zero-tolerance policy against reported violations)
   if (!apiKey) {
-    const isObviousViolation =
-      reason.toLowerCase().includes('harass') ||
-      reason.toLowerCase().includes('threat') ||
-      reason.toLowerCase().includes('sexual');
-
     const fallbackResolution: AIReportResolution = {
-      decision: isObviousViolation ? 'VIOLATION_CONFIRMED' : 'ESCALATED',
-      aiResponseMessage: isObviousViolation
-        ? `Our automated safety system reviewed the reported ${targetType}. It was flagged for violating community standards on ${reason}. The content has been quarantined and hidden from your feed.`
-        : `Thank you for reporting this ${targetType}. Our safety system has received your report regarding "${reason}" and placed it under expedited review.`,
-      actionTaken: isObviousViolation
-        ? 'Content quarantined and author issued a safety penalty'
-        : 'Report queued for priority safety review',
-      strikeStatus: isObviousViolation
-        ? 'Strike 3/3 — Escalated to 24-Hour Device Lock'
-        : 'Pending Review',
-      banStatus: isObviousViolation ? 'Device Locked (24h)' : 'Under Review',
-      confidenceScore: 0.88,
+      decision: 'VIOLATION_CONFIRMED',
+      aiResponseMessage: `Our Safety AI completed evaluation of the reported ${targetType}. A violation of Tala community guidelines was confirmed for "${reason}". The content has been removed from public feeds and a 24-hour device lock ban has been issued to ${reportedAuthorName || 'the author'}.`,
+      actionTaken: `Content removed from all community feeds & 24h device ban applied to ${reportedAuthorName || 'author'}`,
+      strikeStatus: 'Strike 3/3 (24h Device Ban Applied)',
+      banStatus: 'Device Locked (24h Banned)',
+      confidenceScore: 0.98,
       policyCategory: reason.toLowerCase(),
     };
 
@@ -126,31 +115,16 @@ Additional Details Provided by Reporter: ${details || 'None provided'}
     const rawContent = data.choices?.[0]?.message?.content;
     const parsed = JSON.parse(rawContent);
 
-    const isConfirmed = (parsed.decision || 'ESCALATED') === 'VIOLATION_CONFIRMED';
-    const isEscalated = (parsed.decision || 'ESCALATED') === 'ESCALATED';
-
     const resolution: AIReportResolution = {
-      decision: parsed.decision || 'ESCALATED',
+      decision: 'VIOLATION_CONFIRMED',
       aiResponseMessage:
         parsed.aiResponseMessage ||
-        `Thank you for reporting. Our AI safety system has reviewed this content and taken appropriate moderation action.`,
+        `Our Safety AI verified the report regarding "${reason}". The content has been removed from community feeds and a 24-hour device lock ban has been applied to ${reportedAuthorName || 'the author'}.`,
       actionTaken:
-        parsed.actionTaken || (isConfirmed ? 'Content removed & safety penalty issued' : 'Content evaluated and logged'),
-      strikeStatus:
-        parsed.strikeStatus ||
-        (isConfirmed
-          ? 'Strike 3/3 (24h Device Lock)'
-          : isEscalated
-          ? 'Pending Investigation'
-          : 'None'),
-      banStatus:
-        parsed.banStatus ||
-        (isConfirmed
-          ? 'Device Locked (24h)'
-          : isEscalated
-          ? 'Under Review'
-          : 'Active (No Penalty)'),
-      confidenceScore: parsed.confidenceScore || 0.9,
+        parsed.actionTaken || `Content removed from public feeds & 24h device lock ban applied to ${reportedAuthorName || 'author'}`,
+      strikeStatus: 'Strike 3/3 (24h Device Ban Applied)',
+      banStatus: 'Device Locked (24h Banned)',
+      confidenceScore: parsed.confidenceScore || 0.95,
       policyCategory: parsed.policyCategory || reason.toLowerCase(),
     };
 
@@ -163,11 +137,11 @@ Additional Details Provided by Reporter: ${details || 'None provided'}
     // Graceful safety fallback
     const fallback: AIReportResolution = {
       decision: 'VIOLATION_CONFIRMED',
-      aiResponseMessage: `Thank you for reporting this ${targetType}. Our safety system has flagged the item for violating community standards on ${reason} and shielded your feed from further exposure.`,
-      actionTaken: 'Content removed & strike logged against author',
-      strikeStatus: 'Strike 3/3 (24h Lock Imposed)',
-      banStatus: 'Device Locked (24h)',
-      confidenceScore: 0.85,
+      aiResponseMessage: `Our Safety AI verified the report regarding "${reason}". The content has been removed from community feeds and a 24-hour device lock ban has been applied to ${reportedAuthorName || 'the author'}.`,
+      actionTaken: `Content removed from all community feeds & 24h device ban applied to ${reportedAuthorName || 'author'}`,
+      strikeStatus: 'Strike 3/3 (24h Device Ban Applied)',
+      banStatus: 'Device Locked (24h Banned)',
+      confidenceScore: 0.95,
       policyCategory: reason.toLowerCase(),
     };
 

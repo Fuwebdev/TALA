@@ -16,12 +16,14 @@ interface CreateThoughtModalProps {
   locations: Location[];
   selectedLocation: Location | null;
   userGpsCoords?: { lat: number; lng: number } | null;
+  userActualLocation?: Location | null;
   nearbyLocations?: Location[];
   onExactLocationDetected?: (
     location: Location,
     coords: { lat: number; lng: number },
     nearby5km?: Location[]
   ) => Promise<Location>;
+  onRequestGpsLocation?: () => Promise<Location | null>;
   onSubmit: (params: {
     body: string;
     category: Category;
@@ -37,14 +39,17 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   locations,
   selectedLocation: initialLocation,
   userGpsCoords,
+  userActualLocation,
   nearbyLocations = [],
   onExactLocationDetected,
+  onRequestGpsLocation,
   onSubmit,
 }) => {
   const { showToast } = useToast();
   const [body, setBody] = useState('');
   const [category, setCategory] = useState<Category>('Thoughts');
-  const [location, setLocation] = useState<Location | null>(initialLocation || null);
+  // Always prioritize user's actual GPS location over any browsed note location
+  const [location, setLocation] = useState<Location | null>(userActualLocation || null);
   const [localNearby5km, setLocalNearby5km] = useState<Location[]>(nearbyLocations);
   const [loadingNearby, setLoadingNearby] = useState(false);
   const [isEnvironmentalAlert, setIsEnvironmentalAlert] = useState(false);
@@ -60,19 +65,27 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   const [searchedPlaces, setSearchedPlaces] = useState<Location[]>([]);
   const [searchingPlace, setSearchingPlace] = useState(false);
 
-  // Base reference coordinates (user's exact GPS or initial selected location)
+  // Base reference coordinates strictly from user's verified GPS or actual location
   const anchorCoords = useMemo(() => {
-    if (location?.coordinates) return location.coordinates;
     if (userGpsCoords) return userGpsCoords;
-    if (initialLocation?.coordinates) return initialLocation.coordinates;
+    if (userActualLocation?.coordinates) return userActualLocation.coordinates;
+    if (location?.coordinates) return location.coordinates;
     return null;
-  }, [userGpsCoords, initialLocation, location]);
+  }, [userGpsCoords, userActualLocation, location]);
 
+  // Keep location in sync with user's verified GPS location (never foreign note location)
   useEffect(() => {
-    if (initialLocation) {
-      setLocation(initialLocation);
+    if (userActualLocation) {
+      setLocation(userActualLocation);
     }
-  }, [initialLocation]);
+  }, [userActualLocation]);
+
+  // If user opens modal without GPS, automatically trigger GPS detection
+  useEffect(() => {
+    if (isOpen && !userGpsCoords && !userActualLocation && !detectingGps) {
+      handleUseMyCurrentLocation();
+    }
+  }, [isOpen, userGpsCoords, userActualLocation]);
 
   useEffect(() => {
     if (nearbyLocations.length > 0) {
@@ -106,7 +119,7 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
   // Automatically fetch 5km nearby addresses when modal opens if not yet populated
   useEffect(() => {
     if (!isOpen) return;
-    const baseLoc = initialLocation || location;
+    const baseLoc = userActualLocation || location;
     if (!baseLoc || !baseLoc.coordinates) return;
 
     if (localNearby5km.length === 0) {
@@ -124,11 +137,11 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
           setLoadingNearby(false);
         });
     }
-  }, [isOpen, initialLocation]);
+  }, [isOpen, userActualLocation, location]);
 
   // Build dropdown list with Current Location + Nearby Locations within 5km radius
   const nearbyDropdownOptions = useMemo(() => {
-    const baseLoc = location || initialLocation;
+    const baseLoc = userActualLocation || location;
     if (!baseLoc || !anchorCoords) {
       return PHILIPPINE_LOCATIONS.map((loc, idx) => ({
         loc,
@@ -139,14 +152,14 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
 
     const optionsMap = new Map<string, { loc: Location; distKm: number; isCurrent: boolean }>();
 
-    // 1. Always put Current/Selected Location first (0.0 km)
+    // 1. Always put Current GPS/Selected Location first (0.0 km)
     optionsMap.set(baseLoc.cityMunicipality.toLowerCase().trim(), {
       loc: baseLoc,
       distKm: 0,
       isCurrent: true,
     });
 
-    // 2. Add fetched nearby addresses within 5km radius
+    // 2. Add fetched nearby addresses within 5km radius of user's GPS
     const candidates = [...localNearby5km, ...locations];
     for (const item of candidates) {
       if (!item?.coordinates) continue;
@@ -174,7 +187,7 @@ export const CreateThoughtModal: React.FC<CreateThoughtModalProps> = ({
       if (b.isCurrent) return 1;
       return a.distKm - b.distKm;
     });
-  }, [initialLocation, location, localNearby5km, locations, anchorCoords]);
+  }, [userActualLocation, location, localNearby5km, locations, anchorCoords]);
 
   if (!isOpen) return null;
 

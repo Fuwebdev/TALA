@@ -2,7 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HomePage } from './presentation/pages/HomePage';
 import { ToastProvider } from './presentation/components/Toast';
+import { ThemeService } from './application/services/ThemeService';
 import './presentation/styles/index.css';
+
+ThemeService.initTheme();
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
