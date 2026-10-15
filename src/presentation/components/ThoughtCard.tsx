@@ -11,7 +11,7 @@ interface ThoughtCardProps {
   onOpenComments: (thought: Thought) => void;
   onToggleSave: (thoughtId: string) => Promise<void>;
   onReport: (thought: Thought) => void;
-  onSelectLocation?: (locationId: string) => void;
+  onSelectLocation?: (locationId: string, thoughtId?: string) => void;
   onEdit?: (thought: Thought) => void;
   onDelete?: (thoughtId: string) => void;
   onBlockAuthor?: (thought: Thought) => void;
@@ -122,7 +122,7 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
               <span className="shrink-0">{timeAgo(thought.createdAtISO)}</span>
               <span className="shrink-0">•</span>
               <button
-                onClick={() => onSelectLocation?.(thought.location.id)}
+                onClick={() => onSelectLocation?.(thought.location.id, thought.id)}
                 className="inline-flex items-center gap-1 hover:text-sky-400 transition-colors max-w-[150px] xs:max-w-[220px] sm:max-w-none truncate"
                 title={formatLocationName(thought.location)}
               >
@@ -180,10 +180,16 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
 
 
 
-      {/* Body Content */}
-      <p className="text-xs sm:text-sm text-slate-200 leading-relaxed my-3 whitespace-pre-line font-normal break-words">
-        {thought.body}
-      </p>
+      {/* Body Content - Tapping redirects to the map where the note is located */}
+      <div
+        onClick={() => onSelectLocation?.(thought.location.id, thought.id)}
+        className="cursor-pointer group/body"
+        title={`View ${thought.authorAlias.displayName}'s note on map in ${formatLocationName(thought.location)}`}
+      >
+        <p className="text-xs sm:text-sm text-slate-200 leading-relaxed my-3 whitespace-pre-line font-normal break-words group-hover/body:text-sky-300 transition-colors">
+          {thought.body}
+        </p>
+      </div>
 
       {/* Footer Reactions & Action Bar */}
       <div className="flex flex-wrap items-center justify-between gap-y-2.5 gap-x-2 pt-3 mt-3 border-t border-slate-800/80 text-xs">

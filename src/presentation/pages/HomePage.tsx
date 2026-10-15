@@ -619,8 +619,10 @@ export const HomePage: React.FC = () => {
       unexpiredAll = unexpiredAll.filter((t) => !isAuthorBlocked(t.authorAlias));
       setAllThoughtsForUser(unexpiredAll);
 
+      // When a user selects any category (All, Thoughts, School, Life, Community, Environment),
+      // display all community notes across Philippine locations matching that category.
       const feedData = await getFeedUseCase.execute({
-        locationId: viewOnlyMyNotes ? undefined : selectedLocation?.id,
+        locationId: viewOnlyMyNotes ? undefined : (selectedCategory === 'All' ? selectedLocation?.id : undefined),
         category: selectedCategory,
         searchQuery,
       });
@@ -976,6 +978,8 @@ export const HomePage: React.FC = () => {
               <p className="text-xs text-slate-400">
                 {viewOnlyMyNotes
                   ? `Showing notes posted by ${currentAlias.displayName}`
+                  : selectedCategory !== 'All'
+                  ? `Showing ${selectedCategory} notes across all Philippine locations`
                   : selectedLocation
                   ? `Notes left in ${selectedLocation.cityMunicipality}, ${selectedLocation.province}`
                   : 'Showing notes across all Philippine regions'}
@@ -1094,9 +1098,15 @@ export const HomePage: React.FC = () => {
                       authorAliasId: t.authorAlias.id,
                     })
                   }
-                  onSelectLocation={(locId) => {
+                  onSelectLocation={(locId, thoughtId) => {
                     const loc = locations.find(l => l.id === locId);
                     if (loc) setSelectedLocation(loc);
+                    if (thoughtId) setHighlightedThoughtId(thoughtId);
+                    // Smoothly scroll to map view so user sees where the note/location is
+                    const mapEl = document.getElementById('map-section');
+                    if (mapEl) {
+                      mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
                   }}
                 />
               ))}
@@ -1110,7 +1120,7 @@ export const HomePage: React.FC = () => {
         <aside className="lg:col-span-5 space-y-5">
           
           {/* Map Component */}
-          <div>
+          <div id="map-section" className="scroll-mt-20">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
               <span>Philippine Map View</span>
               <span className="text-[10px] text-sky-400">Click note bubble to read</span>

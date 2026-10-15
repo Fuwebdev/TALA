@@ -55,9 +55,9 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 Tala
               </h1>
-              <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold tracking-wide bg-sky-500/10 text-sky-400 rounded-full border border-sky-500/20 uppercase whitespace-nowrap">
-                <PhilippineFlag className="w-3.5 h-2.5" />
-                <span>PH Live</span>
+              <span className="inline-flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 text-[8.5px] sm:text-[10px] font-semibold tracking-wide bg-sky-500/10 text-sky-400 rounded-full border border-sky-500/20 uppercase whitespace-nowrap">
+                <PhilippineFlag className="w-3.5 h-2.5 shrink-0" />
+                <span className="hidden xs:inline">PH Live</span>
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden md:block">
