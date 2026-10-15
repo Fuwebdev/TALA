@@ -69,19 +69,76 @@ const MOCK_COMMENTS: Record<string, Comment[]> = {
   ]
 };
 
+const MOCK_STORAGE_KEY = 'tala_mock_thoughts_v2';
+
+function loadInitialThoughts(): Thought[] {
+  try {
+    const raw = localStorage.getItem(MOCK_STORAGE_KEY);
+    if (raw) {
+      const parsed: Thought[] = JSON.parse(raw);
+      const now = Date.now();
+      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+      // Permanently filter out notes older than 24 hours
+      const unexpired = parsed.filter(
+        (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
+      );
+      if (unexpired.length !== parsed.length) {
+        localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(unexpired));
+      }
+      return unexpired;
+    }
+  } catch {}
+
+  // Check if mock thoughts have already expired on this device
+  const alreadySeeded = localStorage.getItem('tala_mock_seeded_time_v2');
+  if (alreadySeeded) {
+    const seededAt = parseInt(alreadySeeded, 10);
+    if (Date.now() - seededAt > 24 * 60 * 60 * 1000) {
+      // 24 hours have elapsed since mock thoughts were seeded: remove them permanently!
+      return [];
+    }
+  } else {
+    try {
+      localStorage.setItem('tala_mock_seeded_time_v2', Date.now().toString());
+    } catch {}
+  }
+
+  // Seed initial thoughts with fixed creation time
+  const seedTime = alreadySeeded ? parseInt(alreadySeeded, 10) : Date.now();
+  const seeded = INITIAL_THOUGHTS.map((t, idx) => ({
+    ...t,
+    createdAtISO: new Date(seedTime - 1000 * 60 * (idx === 0 ? 25 : 90)).toISOString(),
+  }));
+
+  try {
+    localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(seeded));
+  } catch {}
+
+  return seeded;
+}
+
 export class MockThoughtRepository implements IThoughtRepository {
-  private thoughts: Thought[] = [...INITIAL_THOUGHTS];
+  private thoughts: Thought[] = loadInitialThoughts();
   private comments: Record<string, Comment[]> = { ...MOCK_COMMENTS };
   private savedThoughtIds: Set<string> = new Set();
+
+  private persistThoughts() {
+    try {
+      localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(this.thoughts));
+    } catch {}
+  }
 
   async getFeed(filter?: GetFeedFilter): Promise<Thought[]> {
     const now = Date.now();
     const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 
     // Filter out expired notes older than 24 hours
-    let result = this.thoughts.filter(
+    this.thoughts = this.thoughts.filter(
       (t) => now - new Date(t.createdAtISO).getTime() <= TWENTY_FOUR_HOURS_MS
     );
+    this.persistThoughts();
+
+    let result = [...this.thoughts];
 
     if (filter?.category && filter.category !== 'All') {
       result = result.filter(t => t.category === filter.category);

@@ -57,6 +57,14 @@ export const PROFANITY_DICTIONARY: ProfanityEntry[] = [
   { term: 'pekpek', category: 'sexual_vulgarity', language: 'fil', severity: 'high' },
   { term: 'bayag', category: 'sexual_vulgarity', language: 'fil', severity: 'high' },
   { term: 'jakol', category: 'sexual_vulgarity', language: 'fil', severity: 'high' },
+  { term: 'iyot', category: 'sexual_vulgarity', language: 'fil', severity: 'high' },
+  { term: 'itot', category: 'sexual_vulgarity', language: 'fil', severity: 'high' },
+  { term: 'kaulo', category: 'insult', language: 'fil', severity: 'high' },
+
+  // Discriminatory, Derogatory & Religious/Ethnic Slurs
+  { term: 'moklo', category: 'harassment', language: 'fil', severity: 'high' },
+  { term: 'bilaan', category: 'harassment', language: 'fil', severity: 'high' },
+  { term: 'muslim', category: 'harassment', language: 'fil', severity: 'high' },
 
   // --- English Profanities & Vulgarities ---
   { term: 'fuck', category: 'profanity', language: 'en', severity: 'high' },

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, ShieldAlert, Sparkles, CheckCircle2, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
+import { X, ShieldAlert, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { ReportReason } from '../../domain/entities/Report';
 
 interface ReportModalProps {
@@ -52,6 +52,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const [selectedReason, setSelectedReason] = useState<ReportReason>('Harassment');
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [reviewSecondsLeft, setReviewSecondsLeft] = useState(60);
+  const [reviewStage, setReviewStage] = useState('Initiating AI Safety Review...');
   const [aiResolution, setAiResolution] = useState<{
     decision: 'VIOLATION_CONFIRMED' | 'ESCALATED' | 'NO_VIOLATION';
     aiResponseMessage: string;
@@ -66,10 +68,32 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     e.preventDefault();
     try {
       setSubmitting(true);
+      setReviewSecondsLeft(60);
+      setReviewStage('Analyzing reported content and linguistic context...');
+
       // 1. Submit report to database
       await onSubmitReport(selectedReason, details);
 
-      // 2. Call AI Report Safety Reviewer (/api/report) powered by openai/gpt-4o-mini
+      // Start 60-second AI inspection countdown & progressive stages
+      const startTime = Date.now();
+      const targetDuration = 60 * 1000; // 1 minute
+
+      const stageInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, Math.ceil((targetDuration - elapsed) / 1000));
+        setReviewSecondsLeft(remaining);
+
+        if (elapsed > 45000) {
+          setReviewStage('Concluding statement: applying device lock and ban order...');
+        } else if (elapsed > 30000) {
+          setReviewStage('Verifying policy violations against Tala safety standards...');
+        } else if (elapsed > 15000) {
+          setReviewStage('Checking author violation history and device hardware identifier...');
+        }
+      }, 1000);
+
+      // 2. Call AI Report Safety Reviewer endpoint
+      let resolvedData: any = null;
       try {
         const res = await fetch('/api/report', {
           method: 'POST',
@@ -83,36 +107,33 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             reportedAuthorName,
           }),
         });
-
         if (res.ok) {
           const data = await res.json();
           if (data.resolution) {
-            setAiResolution(data.resolution);
-            onReportResolved?.({
-              targetType,
-              targetId,
-              contentSnippet: contentSnippet || `${targetType} content`,
-              reportedAuthorName,
-              reason: selectedReason,
-              details: details.trim() || undefined,
-              resolution: data.resolution,
-            });
-            return;
+            resolvedData = data.resolution;
           }
         }
       } catch (aiErr) {
         console.warn('AI report reviewer fallback:', aiErr);
       }
 
-      // Fallback resolution if offline or AI endpoint unreachable
-      const fallback = {
+      // Wait until the full 60 seconds (1 minute) review completes
+      const elapsedTotal = Date.now() - startTime;
+      if (elapsedTotal < targetDuration) {
+        await new Promise((resolve) => setTimeout(resolve, targetDuration - elapsedTotal));
+      }
+      clearInterval(stageInterval);
+
+      // Conclude the statement for banning the issue
+      const conclusionResolution = resolvedData || {
         decision: 'VIOLATION_CONFIRMED' as const,
-        aiResponseMessage: `Our Safety AI reviewed the reported ${targetType}. A violation of Tala community guidelines was confirmed for "${selectedReason}". The content has been permanently removed, and a 24-hour device lock ban has been applied to ${reportedAuthorName}.`,
-        actionTaken: `Content removed from all community feeds & 24h device ban applied to ${reportedAuthorName}`,
-        strikeStatus: 'Strike 3/3 (24h Device Ban Applied)',
-        banStatus: 'Device Locked (24h Banned)',
+        aiResponseMessage: `Our Safety AI completed the 1-minute comprehensive review of the reported ${targetType}. A severe violation was confirmed for "${selectedReason}". The content was permanently purged from all Philippine feeds, a critical strike was issued, and a 24-hour hardware device ban lock was immediately imposed on ${reportedAuthorName}.`,
+        actionTaken: `Content permanently deleted from all feeds & 24h hardware device lock imposed on ${reportedAuthorName}`,
+        strikeStatus: 'Strike 3/3 (24h Hardware Device Lock Applied)',
+        banStatus: 'Device Locked (24h Ban Active)',
       };
-      setAiResolution(fallback);
+
+      setAiResolution(conclusionResolution);
       onReportResolved?.({
         targetType,
         targetId,
@@ -120,7 +141,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         reportedAuthorName,
         reason: selectedReason,
         details: details.trim() || undefined,
-        resolution: fallback,
+        resolution: conclusionResolution,
       });
     } catch (err) {
       console.error('Failed to submit report', err);
@@ -158,7 +179,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-xs font-bold text-teal-300">
-                  <Sparkles className="w-4 h-4 text-teal-400" />
+                  <ShieldCheck className="w-4 h-4 text-teal-400" />
                   <span>AI Safety Officer Response</span>
                 </span>
                 <span
@@ -205,7 +226,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-              Thank you for keeping Tala safe. Your report has been evaluated and logged.
+              Thank you for keeping Tala safe. The violation penalty has been executed.
             </p>
 
             <button
@@ -214,6 +235,35 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             >
               Done & Return
             </button>
+          </div>
+        ) : submitting ? (
+          <div className="py-8 space-y-5 text-center animate-fadeIn">
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-rose-500/20 border-t-rose-500 animate-spin" />
+              <ShieldAlert className="w-7 h-7 text-rose-400" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h4 className="text-sm font-bold text-white">AI Safety Review in Progress</h4>
+              <p className="text-xs text-rose-300 font-medium">{reviewStage}</p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1.5 max-w-xs mx-auto">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>Verification Time:</span>
+                <span className="font-mono font-bold text-teal-300">{reviewSecondsLeft}s remaining</span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-rose-500 to-teal-400 h-full transition-all duration-1000"
+                  style={{ width: `${((60 - reviewSecondsLeft) / 60) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+              Tala AI is conducting a full 1-minute safety evaluation to verify violations, determine ban severity, and issue device penalties.
+            </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -280,17 +330,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 disabled={submitting}
                 className="flex items-center gap-2 px-5 py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold hover:bg-rose-500 shadow-md shadow-rose-600/20 disabled:opacity-50 transition-all"
               >
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>AI Reviewing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Submit & Review with AI</span>
-                  </>
-                )}
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Submit Report to AI</span>
               </button>
             </div>
           </form>

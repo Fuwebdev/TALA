@@ -5,12 +5,12 @@ import {
   Clock,
   AlertTriangle,
   RefreshCw,
-  Bot,
+  Scale,
   Send,
   CheckCircle2,
   XCircle,
   X,
-  Sparkles,
+  FileText,
 } from 'lucide-react';
 import { DeviceBanService, DeviceBanStatus } from '../../application/services/DeviceBanService';
 
@@ -178,18 +178,6 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
           </p>
         </div>
 
-        {/* Policies Note */}
-        <div className="text-left text-[11px] text-slate-400 bg-slate-950/40 p-3.5 rounded-xl border border-slate-800/80 space-y-1">
-          <p className="font-semibold text-slate-300">Violation Penalty Escalation:</p>
-          <ul className="list-disc list-inside space-y-0.5 text-slate-400 text-[10px]">
-            <li>1st & 2nd offense: Warnings issued</li>
-            <li>3rd offense: 24-hour device lock</li>
-            <li>4th offense: 3-day device lock</li>
-            <li>5th offense: 7-day device lock</li>
-            <li>6th+ offense: Permanent hardware ban</li>
-          </ul>
-        </div>
-
         {/* Actions: Refresh & Appeal to AI */}
         <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
           <button
@@ -200,9 +188,8 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
             }}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition-all hover:scale-105"
           >
-            <Bot className="w-4 h-4" />
-            <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-            <span>Appeal Suspension to AI</span>
+            <Scale className="w-4 h-4 text-sky-200" />
+            <span>Appeal Suspension</span>
           </button>
 
           {onRefreshCheck && !banStatus.isPermanent && (
@@ -225,11 +212,11 @@ export const DeviceLockScreen: React.FC<DeviceLockScreenProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-sky-500/20 text-sky-400 border border-sky-500/30 flex items-center justify-center">
-                  <Bot className="w-4 h-4" />
+                  <Scale className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">AI Appeal Review</h3>
-                  <p className="text-[10px] text-slate-400">Powered by OpenRouter AI</p>
+                  <h3 className="text-sm font-bold text-white">Appeal Review</h3>
+                  <p className="text-[10px] text-slate-400">Review suspension & submit statement</p>
                 </div>
               </div>
               <button
