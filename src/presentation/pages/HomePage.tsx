@@ -650,7 +650,19 @@ export const HomePage: React.FC = () => {
         });
       }
 
-      setThoughts(filtered);
+      // Strictly deduplicate by ID and author/content signature so no duplicate notes appear
+      const seenFeedIds = new Set<string>();
+      const seenFeedSigs = new Set<string>();
+      const deduplicatedFeed = filtered.filter((t) => {
+        if (seenFeedIds.has(t.id)) return false;
+        const sig = `${t.authorAlias.displayName.toLowerCase().trim()}|${t.body.toLowerCase().trim()}`;
+        if (seenFeedSigs.has(sig)) return false;
+        seenFeedIds.add(t.id);
+        seenFeedSigs.add(sig);
+        return true;
+      });
+
+      setThoughts(deduplicatedFeed);
     } catch (err) {
       console.error('Failed to load feed:', err);
     } finally {

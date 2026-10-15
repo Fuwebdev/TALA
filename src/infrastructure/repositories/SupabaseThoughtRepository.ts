@@ -208,9 +208,14 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
       const mockNotes = await this.fallbackMock.getFeed(filter);
       const combined = [...mapped, ...mockNotes];
       const seenIds = new Set<string>();
+      const seenSignatures = new Set<string>();
+
       const deduplicated = combined.filter((t) => {
         if (seenIds.has(t.id)) return false;
+        const sig = `${t.authorAlias.displayName.toLowerCase().trim()}|${t.body.toLowerCase().trim()}`;
+        if (seenSignatures.has(sig)) return false;
         seenIds.add(t.id);
+        seenSignatures.add(sig);
         return true;
       });
 
@@ -247,9 +252,6 @@ export class SupabaseThoughtRepository implements IThoughtRepository {
       } catch (cleanErr) {
         console.warn('[Supabase] Old thoughts cleanup notice:', cleanErr);
       }
-
-      // Also clean up in fallback mock repository
-      await this.fallbackMock.createThought(params);
 
       const { data, error } = await supabase
         .from('thoughts')
