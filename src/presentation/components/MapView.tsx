@@ -4,6 +4,7 @@ import { PHILIPPINES_MAP_OPTIONS } from '../../infrastructure/maps/maplibre-conf
 import { Location } from '../../domain/entities/Location';
 import { Thought } from '../../domain/entities/Thought';
 import { ThemeService } from '../../application/services/ThemeService';
+import { PhilippineFlag } from './PhilippineFlag';
 import {
   Shield,
   Navigation,
@@ -90,6 +91,11 @@ export const MapView: React.FC<MapViewProps> = ({
   useEffect(() => {
     const timer = setTimeout(() => {
       mapRef.current?.resize();
+      try {
+        if (mapRef.current && (mapRef.current as any).setCooperativeGestures) {
+          (mapRef.current as any).setCooperativeGestures(!isFullScreen);
+        }
+      } catch {}
     }, 150);
     return () => clearTimeout(timer);
   }, [isFullScreen]);
@@ -119,6 +125,7 @@ export const MapView: React.FC<MapViewProps> = ({
         ...PHILIPPINES_MAP_OPTIONS,
         center: initialCenter,
         zoom: initialZoom,
+        cooperativeGestures: !isFullScreen,
       });
 
       map.on('load', () => {
@@ -372,7 +379,11 @@ export const MapView: React.FC<MapViewProps> = ({
       }
     >
       {/* Map Canvas */}
-      <div ref={mapContainerRef} className="w-full h-full absolute inset-0" />
+      <div
+        ref={mapContainerRef}
+        className="w-full h-full absolute inset-0"
+        style={{ touchAction: isFullScreen ? 'none' : 'pan-y' }}
+      />
 
       {/* Top Floating Controls Bar */}
       <div className="absolute top-3 left-3 right-3 z-20 flex items-center justify-between gap-2 pointer-events-none">
@@ -402,9 +413,10 @@ export const MapView: React.FC<MapViewProps> = ({
           <button
             onClick={handleResetToPhilippinesView}
             title="View all notes across the Philippines"
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-2xl bg-slate-950/85 hover:bg-slate-900 backdrop-blur-md border border-slate-800 text-[11px] font-semibold text-sky-300 transition-all shadow-md active:scale-95"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-slate-950/85 hover:bg-slate-900 backdrop-blur-md border border-slate-800 text-[11px] font-semibold text-sky-300 transition-all shadow-md active:scale-95"
           >
-            <span>🇵🇭 All PH</span>
+            <PhilippineFlag className="w-4 h-2.5" />
+            <span>All PH</span>
           </button>
 
           <button

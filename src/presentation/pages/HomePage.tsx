@@ -12,6 +12,7 @@ import { PwaInstallGateModal } from '../components/PwaInstallGateModal';
 import { DeviceLockScreen } from '../components/DeviceLockScreen';
 import { DeviceBanService, DeviceBanStatus } from '../../application/services/DeviceBanService';
 import { ReportHistoryService, UserSubmittedReport } from '../../application/services/ReportHistoryService';
+import { PhilippineFlag } from '../components/PhilippineFlag';
 
 import { createAnonymousAlias, getCachedAlias, saveCachedAlias, Alias } from '../../domain/entities/Alias';
 import { Location } from '../../domain/entities/Location';
@@ -1251,10 +1252,10 @@ export const HomePage: React.FC = () => {
               Tala — Anonymous Location Notes
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-[11px] font-medium text-slate-200 shadow-sm">
-              <span className="text-sm">🇵🇭</span>
-              <span>Philippines</span>
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-slate-800 text-[11px] font-semibold text-slate-200 shadow-sm leading-none">
+              <PhilippineFlag className="w-5 h-3.5" />
+              <span className="translate-y-[0.5px]">Philippines</span>
             </span>
             <span className="text-[11px] text-slate-400">Leave a note where you are</span>
           </div>
