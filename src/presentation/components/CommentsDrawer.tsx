@@ -7,6 +7,7 @@ import { ModerationService } from '../../application/services/ModerationService'
 import { DeviceBanService } from '../../application/services/DeviceBanService';
 import { ConfirmModal } from './ConfirmModal';
 import { useToast } from './Toast';
+import { TalaAvatar } from './TalaAvatar';
 
 interface CommentsDrawerProps {
   isOpen: boolean;
@@ -106,13 +107,20 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
         </div>
 
         {/* Original Note Context */}
-        <div className="p-4 bg-slate-950/40 border-b border-slate-800/80">
-          <div className="flex items-center gap-2 text-xs text-slate-400 mb-1.5">
-            <span className="font-semibold text-sky-300">{thought.authorAlias.displayName}</span>
-            <span>•</span>
-            <span className="text-[11px]">{thought.location.cityMunicipality || thought.location.province}</span>
+        <div className="p-4 bg-slate-950/40 border-b border-slate-800/80 flex items-start gap-3">
+          <TalaAvatar
+            seed={thought.authorAlias.avatarSeed || thought.authorAlias.displayName}
+            size="md"
+            className="shrink-0 mt-0.5"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-1.5 flex-wrap">
+              <span className="font-semibold text-sky-300 truncate">{thought.authorAlias.displayName}</span>
+              <span>•</span>
+              <span className="text-[11px] truncate">{thought.location.cityMunicipality || thought.location.province}</span>
+            </div>
+            <p className="text-xs text-slate-200 line-clamp-3 leading-relaxed">{thought.body}</p>
           </div>
-          <p className="text-xs text-slate-200 line-clamp-3 leading-relaxed">{thought.body}</p>
         </div>
 
         {/* Comments Feed */}
@@ -130,9 +138,14 @@ export const CommentsDrawer: React.FC<CommentsDrawerProps> = ({
             comments.map(c => (
               <div key={c.id} className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs space-y-1.5 group">
                 <div className="flex items-center justify-between text-slate-400">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-bold text-slate-200">{c.authorAlias.displayName}</span>
-                    <span className="text-[10px] text-slate-500">• {timeAgo(c.createdAtISO)}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <TalaAvatar
+                      seed={c.authorAlias.avatarSeed || c.authorAlias.displayName}
+                      size="xs"
+                      className="shrink-0"
+                    />
+                    <span className="font-bold text-slate-200 truncate">{c.authorAlias.displayName}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0">• {timeAgo(c.createdAtISO)}</span>
                   </div>
                   <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     {onBlockUser && c.authorAlias.displayName.toLowerCase() !== currentAlias.displayName.toLowerCase() && (

@@ -2,6 +2,7 @@ import React from 'react';
 import { MapPin, Plus, ShieldCheck, Navigation, Settings, Download, Map, Palette } from 'lucide-react';
 import { Alias } from '../../domain/entities/Alias';
 import { PhilippineFlag } from './PhilippineFlag';
+import { TalaAvatar } from './TalaAvatar';
 
 interface HeaderProps {
   currentAlias: Alias;
@@ -124,10 +125,14 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={() => onOpenSettingsModal('profile')}
             title={`User Settings: ${currentAlias.displayName}`}
-            className="flex items-center gap-1 sm:gap-1.5 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800/80 border border-slate-800 text-xs font-medium text-slate-300 transition-all active:scale-95 shrink-0"
+            className="flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800/80 border border-slate-800 text-xs font-medium text-slate-300 transition-all active:scale-95 shrink-0"
           >
-            <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-400 shrink-0" />
-            <span className="hidden sm:inline-block max-w-[120px] truncate">{currentAlias.displayName}</span>
+            <TalaAvatar
+              seed={currentAlias.avatarSeed || currentAlias.displayName}
+              size="xs"
+              className="shrink-0 ring-1 ring-sky-500/30"
+            />
+            <span className="hidden sm:inline-block max-w-[120px] truncate font-medium">{currentAlias.displayName}</span>
             <Settings className="w-3.5 h-3.5 text-slate-400 hover:text-sky-400 shrink-0 hidden sm:inline-block" />
           </button>
 

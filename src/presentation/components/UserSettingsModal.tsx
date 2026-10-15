@@ -30,6 +30,7 @@ import { PHILIPPINE_LOCATIONS } from '../../infrastructure/repositories/MockLoca
 import { ConfirmModal } from './ConfirmModal';
 import { UserSubmittedReport } from '../../application/services/ReportHistoryService';
 import { TALA_THEMES, ThemeService, ThemeId } from '../../application/services/ThemeService';
+import { TalaAvatar, TALA_MASCOT_IDS, TALA_MASCOT_LABELS, TalaMascotId } from './TalaAvatar';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -82,6 +83,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   onDeleteReport,
 }) => {
   const [usernameInput, setUsernameInput] = useState(currentAlias.displayName);
+  const [avatarSeedInput, setAvatarSeedInput] = useState(currentAlias.avatarSeed || currentAlias.displayName);
   const [activeTab, setActiveTab] = useState<'profile' | 'themes' | 'mynotes' | 'blocked' | 'reports'>(
     initialTab || 'profile'
   );
@@ -135,10 +137,11 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setUsernameInput(currentAlias.displayName);
+      setAvatarSeedInput(currentAlias.avatarSeed || currentAlias.displayName);
       setValidationError(null);
       setSavedSuccess(false);
     }
-  }, [isOpen, currentAlias.displayName]);
+  }, [isOpen, currentAlias.displayName, currentAlias.avatarSeed]);
 
   useEffect(() => {
     if (isOpen && isFirstTimeOnboarding) {
@@ -193,7 +196,19 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
   const handleRandomize = () => {
     const generated = createAnonymousAlias();
     setUsernameInput(generated.displayName);
+    setAvatarSeedInput(generated.avatarSeed);
     setValidationError(null);
+  };
+
+  const handleRandomizeAvatar = () => {
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const randomMascot = TALA_MASCOT_IDS[Math.floor(Math.random() * TALA_MASCOT_IDS.length)];
+    setAvatarSeedInput(`mascot-${randomMascot}-${randomSuffix}`);
+  };
+
+  const handleSelectMascot = (mascotId: TalaMascotId) => {
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    setAvatarSeedInput(`mascot-${mascotId}-${randomSuffix}`);
   };
 
   const handleTriggerLocation = async () => {
@@ -273,7 +288,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
     const updatedAlias: Alias = {
       ...currentAlias,
       displayName: usernameInput.trim(),
-      avatarSeed: usernameInput.trim(),
+      avatarSeed: (avatarSeedInput || usernameInput).trim(),
     };
 
     onSaveUsername(updatedAlias);
@@ -524,6 +539,80 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
         {((!isFirstTimeOnboarding && activeTab === 'profile') ||
           (isFirstTimeOnboarding && onboardingStep === 'username')) && (
           <form onSubmit={handleSubmitUsername} className="space-y-4">
+            {/* ANONYMOUS AVATAR STUDIO */}
+            <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Your Anonymous Avatar
+                  </label>
+                  <span className="text-[10px] text-slate-400">Gender-neutral Philippine & cosmic Tala mascots</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRandomizeAvatar}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-[11px] text-sky-300 hover:text-sky-200 font-semibold transition-all active:scale-95"
+                >
+                  <Dices className="w-3.5 h-3.5" />
+                  <span>Shuffle Avatar</span>
+                </button>
+              </div>
+
+              {/* Active Avatar Highlight */}
+              <div className="flex items-center gap-3.5 p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+                <TalaAvatar
+                  seed={avatarSeedInput}
+                  size="xl"
+                  showGlow
+                  className="ring-2 ring-sky-500/40 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-slate-200">
+                    {(() => {
+                      for (const id of TALA_MASCOT_IDS) {
+                        if (avatarSeedInput.includes(`mascot-${id}`)) return TALA_MASCOT_LABELS[id];
+                      }
+                      return 'Cosmic Tala Mascot';
+                    })()}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+                    100% anonymous & distinct. Pick any mascot below or tap shuffle for surprise colors!
+                  </p>
+                </div>
+              </div>
+
+              {/* 16-Mascot Archetype Quick-Select Grid */}
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Choose Tala Archetype:
+                </div>
+                <div className="grid grid-cols-4 xs:grid-cols-8 gap-2">
+                  {TALA_MASCOT_IDS.map((mId) => {
+                    const isSelected = avatarSeedInput.includes(`mascot-${mId}`);
+                    return (
+                      <button
+                        key={mId}
+                        type="button"
+                        onClick={() => handleSelectMascot(mId)}
+                        title={TALA_MASCOT_LABELS[mId]}
+                        className={`p-1.5 rounded-xl flex flex-col items-center gap-1 transition-all border ${
+                          isSelected
+                            ? 'bg-sky-500/20 border-sky-400 ring-2 ring-sky-400/50 scale-105'
+                            : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-850'
+                        }`}
+                      >
+                        <TalaAvatar seed={`mascot-${mId}`} size="sm" />
+                        <span className="text-[8.5px] text-slate-300 font-medium truncate max-w-[42px] text-center">
+                          {TALA_MASCOT_LABELS[mId].split(' ')[0]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* USERNAME SECTION */}
             <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
                 <label htmlFor="tala-username" className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
@@ -540,9 +629,7 @@ export const UserSettingsModal: React.FC<UserSettingsModalProps> = ({
               </div>
 
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-slate-800 to-slate-700 flex items-center justify-center font-bold text-sky-400 text-sm border border-slate-700 shrink-0">
-                  {usernameInput.trim().charAt(0).toUpperCase() || '?'}
-                </div>
+                <TalaAvatar seed={avatarSeedInput} size="md" className="shrink-0" />
                 <input
                   id="tala-username"
                   name="username"

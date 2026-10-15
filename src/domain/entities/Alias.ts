@@ -67,9 +67,12 @@ export function createAnonymousAlias(seedName?: string): Alias {
   
   const displayName = seedName ? seedName.trim() : `${randomPrefix}${randomNoun}_${randomNum}`;
 
+  const randomSuffix = Math.random().toString(36).substring(2, 7);
+  const avatarSeed = seedName ? seedName.trim() : `${displayName}_${randomSuffix}`;
+
   return {
     id: generateUUID(),
     displayName,
-    avatarSeed: displayName,
+    avatarSeed,
   };
 }

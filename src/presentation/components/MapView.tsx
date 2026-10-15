@@ -5,6 +5,7 @@ import { Location } from '../../domain/entities/Location';
 import { Thought } from '../../domain/entities/Thought';
 import { ThemeService } from '../../application/services/ThemeService';
 import { PhilippineFlag } from './PhilippineFlag';
+import { TalaAvatar } from './TalaAvatar';
 import {
   Shield,
   Navigation,
@@ -443,7 +444,12 @@ export const MapView: React.FC<MapViewProps> = ({
       {selectedThoughtPreview && (
         <div className="absolute bottom-16 sm:bottom-4 left-3 right-3 sm:left-4 sm:right-auto sm:max-w-md z-30 p-3.5 rounded-2xl bg-slate-950/95 backdrop-blur-xl border border-teal-500/40 shadow-2xl space-y-2 animate-fadeIn">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <TalaAvatar
+                seed={selectedThoughtPreview.authorAlias.avatarSeed || selectedThoughtPreview.authorAlias.displayName}
+                size="xs"
+                className="shrink-0"
+              />
               <span className="text-xs font-bold text-teal-300 truncate">
                 {selectedThoughtPreview.authorAlias.displayName}
               </span>

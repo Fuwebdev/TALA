@@ -3,6 +3,7 @@ import { Heart, MessageSquare, MapPin, AlertTriangle, Share2, Award, Bookmark, F
 import { Thought } from '../../domain/entities/Thought';
 import { formatLocationName } from '../../domain/entities/Location';
 import { ConfirmModal } from './ConfirmModal';
+import { TalaAvatar } from './TalaAvatar';
 
 interface ThoughtCardProps {
   thought: Thought;
@@ -96,9 +97,11 @@ export const ThoughtCard: React.FC<ThoughtCardProps> = ({
         {/* Left: Avatar + Author Handle + Timestamp/Location */}
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {/* Avatar Icon */}
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-slate-800 to-slate-700 flex items-center justify-center font-bold text-sky-400 text-sm border border-slate-700 shadow-inner shrink-0">
-            {thought.authorAlias.displayName.charAt(0).toUpperCase()}
-          </div>
+          <TalaAvatar
+            seed={thought.authorAlias.avatarSeed || thought.authorAlias.displayName}
+            size="md"
+            className="shrink-0"
+          />
 
           <div className="min-w-0 flex-1">
             {/* Author Handle & Badge */}
